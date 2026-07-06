@@ -72,6 +72,14 @@
 
   function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+  function updateViewportVars() {
+    const vv = window.visualViewport;
+    const width = vv?.width || window.innerWidth || document.documentElement.clientWidth || 360;
+    const height = vv?.height || window.innerHeight || document.documentElement.clientHeight || 640;
+    document.documentElement.style.setProperty('--npcpv-vw', width + 'px');
+    document.documentElement.style.setProperty('--npcpv-vh', height + 'px');
+  }
+
   function statusOf(value) { return STATUSES.find(x => x[0] === value) || STATUSES[0]; }
   function moodOf(value) { return MOODS.find(x => x[0] === value) || MOODS[0]; }
   function affectionColor(value) {
@@ -911,6 +919,7 @@
   }
 
   async function openPanel() {
+    updateViewportVars();
     bindLiveUpdates();
     await loadRows();
     let root = document.getElementById(PANEL_ID);
@@ -963,6 +972,7 @@
   }
 
   function boot() {
+    updateViewportVars();
     ensureButton();
     keepButtonVisible();
     bindSettingsEntry();
@@ -1036,9 +1046,9 @@
   window.NPCPreviewOpen = openPanel;
   boot();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
-  window.addEventListener('resize', keepButtonVisible);
-  window.visualViewport?.addEventListener('resize', keepButtonVisible);
-  window.visualViewport?.addEventListener('scroll', keepButtonVisible);
+  window.addEventListener('resize', () => { updateViewportVars(); keepButtonVisible(); });
+  window.visualViewport?.addEventListener('resize', () => { updateViewportVars(); keepButtonVisible(); });
+  window.visualViewport?.addEventListener('scroll', () => { updateViewportVars(); keepButtonVisible(); });
   setTimeout(boot, 500);
   setTimeout(boot, 2000);
   setTimeout(boot, 6000);

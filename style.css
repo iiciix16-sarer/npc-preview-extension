@@ -262,15 +262,15 @@
     font-size: 13px;
     box-shadow: 0 8px 28px rgba(0,0,0,.34);
   }
-  .npcpv-mask { align-items: stretch; justify-content: stretch; padding: 0; }
-  .npcpv-modal { width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
-  .npcpv-header { height: auto; min-height: 50px; align-items: flex-start; flex-direction: column; padding: 10px 12px 8px; gap: 8px; }
+  .npcpv-mask { align-items: stretch; justify-content: stretch; inset: auto 0 0 0; width: var(--npcpv-vw, 100vw); height: var(--npcpv-vh, 100vh); padding: 0; overflow: hidden; }
+  .npcpv-modal { width: var(--npcpv-vw, 100vw); height: var(--npcpv-vh, 100vh); max-width: none; max-height: none; border: 0; border-radius: 0; }
+  .npcpv-header { height: auto; min-height: 0; flex: 0 0 auto; align-items: flex-start; flex-direction: column; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; gap: 8px; }
   .npcpv-title { width: 100%; justify-content: space-between; font-size: 15px; }
   .npcpv-actions { width: 100%; flex-wrap: nowrap; justify-content: flex-start; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
   .npcpv-btn { flex: 0 0 auto; padding: 7px 9px; font-size: 12px; }
   .npcpv-close { position: absolute; top: 8px; right: 10px; }
   .npcpv-db-warn { max-height: 58px; overflow: auto; font-size: 11px; }
-  .npcpv-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(190px, 38dvh) minmax(0, 1fr); overflow: hidden; }
+  .npcpv-body { flex: 1 1 auto; min-height: 0; height: auto; display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(150px, 34%) minmax(0, 1fr); overflow: hidden; }
   .npcpv-list { min-height: 0; border-right: 0; border-bottom: 1px solid #e5efe5; }
   .npcpv-search { margin: 8px; padding: 8px; }
   .npcpv-filters { max-height: 42px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: 0 8px 8px; }
@@ -279,10 +279,22 @@
   .npcpv-group-cards { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
   .npcpv-card { min-height: 92px; padding: 7px 4px; }
   .npcpv-avatar { width: 40px; height: 40px; }
-  .npcpv-detail { min-height: 0; max-height: none; overflow: auto; border-top: 0; padding: 12px; -webkit-overflow-scrolling: touch; }
+  .npcpv-detail { min-height: 0; max-height: none; overflow: auto; border-top: 0; padding: 12px 12px calc(18px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
   .npcpv-profile { align-items: flex-start; gap: 10px; }
   .npcpv-big-avatar { width: 62px; height: 62px; font-size: 22px; }
-  .npcpv-dialog { width: calc(100vw - 20px); max-height: calc(100dvh - 24px); padding: 12px; }
+  .npcpv-modal-sub { align-items: stretch; padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom)); }
+  .npcpv-dialog { width: calc(var(--npcpv-vw, 100vw) - 20px); max-height: calc(var(--npcpv-vh, 100vh) - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); padding: 12px; }
   .npcpv-dialog-actions { flex-wrap: wrap; }
   .npcpv-import-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 430px) and (orientation: portrait) {
+  .npcpv-body { grid-template-rows: minmax(128px, 30%) minmax(0, 1fr); }
+  .npcpv-cards { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); }
+  .npcpv-group-cards { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); }
+  .npcpv-card { min-height: 84px; }
+  .npcpv-avatar { width: 34px; height: 34px; }
+  .npcpv-name { font-size: 11px; }
+  .npcpv-faction { font-size: 9px; }
+  .npcpv-section { margin: 10px 0; }
 }
