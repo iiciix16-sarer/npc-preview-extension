@@ -101,7 +101,7 @@
   function addCandidate(map, name, sourceText) {
     const clean = normalizeName(name);
     if (!clean || clean.length < 2 || clean.length > 18) return;
-    if (/^(用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|身份|势力)$/.test(clean)) return;
+    if (/^(用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|名字|NPC名称|NPC姓名|NPC名字|身份|势力)$/.test(clean)) return;
     if (!/[\u4e00-\u9fffA-Za-z]/.test(clean)) return;
     if (!map.has(clean)) map.set(clean, { name: clean, faction: inferFaction(sourceText), identity: inferIdentity(sourceText) });
     const item = map.get(clean);
@@ -178,28 +178,42 @@
     return `${joined.length}:${hash}`;
   }
 
-  function scanNpcCandidates(entries) {
+  function variableValuePatterns(variable) {
+    const v = variable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return [
+      new RegExp(`\\{\\{setvar::${v}::([^}]+)\\}\\}`, 'gi'),
+      new RegExp(`\\{\\{setvar::${v}=([^}]+)\\}\\}`, 'gi'),
+      new RegExp(`/setvar\\s+(?:key=)?${v}\\s+(?:value=)?([^|\\n]+)`, 'gi'),
+      new RegExp(`/setvar\\s+${v}=([^|\\n]+)`, 'gi'),
+      new RegExp(`["']?${v}["']?\\s*[:=：]\\s*["']?([^"'，。；;\\n}]+)`, 'gi'),
+    ];
+  }
+
+  function extractVariableValues(text, variable) {
+    const values = [];
+    for (const re of variableValuePatterns(variable)) {
+      let match;
+      while ((match = re.exec(text))) values.push(match[1]);
+    }
+    return values;
+  }
+
+  async function readNpcNameVariableIfReferenced(entries) {
+    const mentions = entries.some(entry => /NPC名字/.test(`${entry.comment}\n${entry.keys.join('\n')}\n${entry.content}`));
+    if (!mentions) return [];
+    const value = await getVar('NPC名字', '');
+    return value ? splitNames(value) : [];
+  }
+
+  async function scanNpcCandidates(entries) {
     const map = new Map();
     for (const entry of entries) {
       const header = `${entry.comment}\n${entry.keys.join('\n')}`;
       const body = entry.content;
-      const explicitNpc = /\bNPC\b|NPC|npc/i.test(header) || /(?:NPC名称|NPC姓名|NPC名字|npc_name|npcName)\s*[:：=]/i.test(body);
-      if (!explicitNpc) continue;
-
       const text = `${header}\n${body}`;
-      for (const line of text.split(/\r?\n/).filter(Boolean)) {
-        let m;
-        const direct = /(?:NPC(?:名称|姓名|名字)?|npc(?:_?name)?)\s*[:：=]\s*([^。；;\n]{2,80})/gi;
-        while ((m = direct.exec(line))) splitNames(m[1]).forEach(name => addCandidate(map, name, line));
-        const listHeader = /NPC(?:名单|目录|列表)\s*[:：]\s*([^。；;\n]{2,120})/i.exec(line);
-        if (listHeader) splitNames(listHeader[1]).forEach(name => addCandidate(map, name, line));
-      }
-
-      if (!/(?:NPC名称|NPC姓名|NPC名字|npc_name|npcName|NPC(?:名单|目录|列表))\s*[:：=]/i.test(body)) {
-        const fromComment = entry.comment.match(/(?:NPC|npc)\s*[-_：: ]\s*([^，。；;\n]{2,18})/i);
-        if (fromComment) addCandidate(map, fromComment[1], text);
-      }
+      extractVariableValues(text, 'NPC名字').forEach(value => splitNames(value).forEach(name => addCandidate(map, name, text)));
     }
+    (await readNpcNameVariableIfReferenced(entries)).forEach(name => addCandidate(map, name, '变量：NPC名字'));
     return Array.from(map.values());
   }
 
@@ -210,7 +224,7 @@
       const entries = await scanWorldbookEntries();
       const signature = entriesSignature(entries);
       if (!force && signature && scanState().signature === signature) return { scanned: entries.length, found: 0, added: 0, dbAdded: 0, cached: true };
-      const found = scanNpcCandidates(entries);
+      const found = await scanNpcCandidates(entries);
       saveScanState({ signature });
       if (!found.length) return { scanned: entries.length, found: 0, added: 0, dbAdded: 0 };
       const byName = new Set(registry().map(n => n.name));
@@ -457,7 +471,7 @@
       render();
       const message = result?.found
         ? `重扫完成：读取世界书条目 ${result.scanned} 条，识别 ${result.found} 个NPC，新增 ${result.added} 个${result.dbAdded ? `，数据库新增 ${result.dbAdded} 行` : ''}。`
-        : `重扫完成：读取世界书条目 ${result?.scanned || 0} 条，未识别到NPC。请确认世界书条目里存在“NPC名称：名字”“NPC姓名：名字”“NPC名字：名字”或“NPC名单：名字1、名字2”。`;
+        : `重扫完成：读取世界书条目 ${result?.scanned || 0} 条，未识别到NPC。请确认世界书里有对变量“NPC名字”的赋值，或当前聊天变量里已有“NPC名字”的值。`;
       showNotice(message);
     } catch (err) {
       console.error(err);
