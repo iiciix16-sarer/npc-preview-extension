@@ -251,13 +251,27 @@
 .npcpv-empty.compact { min-height: 64px; height: auto; }
 
 @media (max-width: 640px) {
-  .npcpv-mask { align-items: stretch; padding: 0; }
-  .npcpv-modal { height: 100vh; max-height: 100vh; border-radius: 0; }
-  .npcpv-body { min-height: 0; grid-template-columns: 1fr; grid-template-rows: minmax(260px, 48vh) 1fr; }
-  .npcpv-list { border-right: 0; }
-  .npcpv-cards { grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); }
-  .npcpv-detail { max-height: none; border-top: 1px solid #e5efe5; }
-  .npcpv-header { height: auto; min-height: 52px; }
-  .npcpv-actions { gap: 5px; }
-  .npcpv-btn { padding: 6px 8px; }
+  .npcpv-mask { align-items: stretch; justify-content: stretch; padding: 0; }
+  .npcpv-modal { width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .npcpv-header { height: auto; min-height: 50px; align-items: flex-start; flex-direction: column; padding: 10px 12px 8px; gap: 8px; }
+  .npcpv-title { width: 100%; justify-content: space-between; font-size: 15px; }
+  .npcpv-actions { width: 100%; flex-wrap: nowrap; justify-content: flex-start; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+  .npcpv-btn { flex: 0 0 auto; padding: 7px 9px; font-size: 12px; }
+  .npcpv-close { position: absolute; top: 8px; right: 10px; }
+  .npcpv-db-warn { max-height: 58px; overflow: auto; font-size: 11px; }
+  .npcpv-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(190px, 38dvh) minmax(0, 1fr); overflow: hidden; }
+  .npcpv-list { min-height: 0; border-right: 0; border-bottom: 1px solid #e5efe5; }
+  .npcpv-search { margin: 8px; padding: 8px; }
+  .npcpv-filters { max-height: 42px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: 0 8px 8px; }
+  .npcpv-chip { flex: 0 0 auto; }
+  .npcpv-cards { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; padding: 0 8px 8px; }
+  .npcpv-group-cards { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
+  .npcpv-card { min-height: 92px; padding: 7px 4px; }
+  .npcpv-avatar { width: 40px; height: 40px; }
+  .npcpv-detail { min-height: 0; max-height: none; overflow: auto; border-top: 0; padding: 12px; -webkit-overflow-scrolling: touch; }
+  .npcpv-profile { align-items: flex-start; gap: 10px; }
+  .npcpv-big-avatar { width: 62px; height: 62px; font-size: 22px; }
+  .npcpv-dialog { width: calc(100vw - 20px); max-height: calc(100dvh - 24px); padding: 12px; }
+  .npcpv-dialog-actions { flex-wrap: wrap; }
+  .npcpv-import-row { grid-template-columns: 1fr; }
 }

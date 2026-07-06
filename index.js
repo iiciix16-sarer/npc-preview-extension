@@ -401,11 +401,47 @@
     const raw = String(text || '').trim();
     const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
     const body = fenced ? fenced[1].trim() : raw;
+    const direct = parse(body, null);
+    if (Array.isArray(direct)) return direct.map(normalizeAiNpc).filter(x => x['NPC名称']);
+    if (direct && typeof direct === 'object') {
+      const arr = direct.NPC列表 || direct.npcs || direct.NPCs || direct.data || direct.items || direct.list;
+      if (Array.isArray(arr)) return arr.map(normalizeAiNpc).filter(x => x['NPC名称']);
+      if (direct.NPC名称 || direct.name || direct.名字 || direct.名称) return [normalizeAiNpc(direct)].filter(x => x['NPC名称']);
+    }
     const start = body.indexOf('[');
     const end = body.lastIndexOf(']');
-    if (start < 0 || end < start) return [];
-    const parsed = parse(body.slice(start, end + 1), []);
-    return Array.isArray(parsed) ? parsed : [];
+    if (start >= 0 && end > start) {
+      const parsed = parse(body.slice(start, end + 1), []);
+      if (Array.isArray(parsed)) return parsed.map(normalizeAiNpc).filter(x => x['NPC名称']);
+    }
+    const objStart = body.indexOf('{');
+    const objEnd = body.lastIndexOf('}');
+    if (objStart >= 0 && objEnd > objStart) {
+      const parsed = parse(body.slice(objStart, objEnd + 1), null);
+      if (parsed && typeof parsed === 'object') {
+        const arr = parsed.NPC列表 || parsed.npcs || parsed.NPCs || parsed.data || parsed.items || parsed.list;
+        if (Array.isArray(arr)) return arr.map(normalizeAiNpc).filter(x => x['NPC名称']);
+        return [normalizeAiNpc(parsed)].filter(x => x['NPC名称']);
+      }
+    }
+    return [];
+  }
+
+  function normalizeAiNpc(item) {
+    if (!item || typeof item !== 'object') return {};
+    return {
+      'NPC名称': item.NPC名称 || item.name || item.名字 || item.名称 || item.NPC名字 || '',
+      '势力': item.势力 || item.阵营 || item.组织 || item.所属 || '',
+      '身份': item.身份 || item.职业 || item.职位 || item.身份介绍 || '',
+      '好感度': item.好感度 ?? item.好感 ?? 0,
+      '状态': item.状态 || 'offline',
+      '心情': item.心情 || 'calm',
+      '备注': item.备注 || item.说明 || '',
+      '首次登场': item.首次登场 || item.首次登场时间 || item.章节 || '',
+      '登场事件': item.登场事件 || item.首次登场事件 || item.发生了什么 || '',
+      'NPC关系': item.NPC关系 || item.关系 || '',
+      '好感历史': item.好感历史 || '[]',
+    };
   }
 
   async function upsertDbNpc(item) {
@@ -457,7 +493,7 @@
     ], { maxTokens: 4000 });
     const list = extractJsonArray(response);
     if (!list.length) {
-      showNotice('AI同步没有解析到可写入的 JSON 数组。模型返回开头：' + String(response || '').slice(0, 240));
+      showNotice('AI同步收到模型返回，但没有找到可写入的 NPC 数据。请检查模型返回是否包含 NPC名称/name/名字 字段。返回开头：' + String(response || '').slice(0, 240));
       finish();
       return;
     }
