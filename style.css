@@ -250,8 +250,6 @@
 .npcpv-import-row b { overflow-wrap: anywhere; color: var(--npcpv-accent, #2e7d32); }
 .npcpv-import-row span { overflow-wrap: anywhere; white-space: normal; }
 .npcpv-empty.compact { min-height: 64px; height: auto; }
-.npcpv-settings-entry { margin: 8px 0; padding: 10px; border: 1px solid #dcebdc; border-radius: 10px; background: #fbfdfb; }
-.npcpv-settings-title { margin-bottom: 8px; color: var(--npcpv-accent, #2e7d32); font-weight: 800; }
 
 @media (max-width: 640px) {
   .npcpv-open-button {

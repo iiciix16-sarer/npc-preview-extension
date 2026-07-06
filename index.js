@@ -36,6 +36,7 @@
   let liveUpdateBound = false;
   let settingsEntryBound = false;
   let buttonObserver = null;
+  let suppressNextClick = false;
 
   function ctxKey(prefix) {
     try {
@@ -542,16 +543,8 @@
   }
 
   function bindSettingsEntry() {
-    if (settingsEntryBound) return;
-    const host = document.querySelector('#extensions_settings2') || document.querySelector('#extensions_settings') || document.querySelector('#third_party_extension_settings') || document.querySelector('.extensions_settings');
-    if (!host) return;
     settingsEntryBound = true;
-    const wrap = document.createElement('div');
-    wrap.id = 'npcpv-settings-entry';
-    wrap.className = 'npcpv-settings-entry';
-    wrap.innerHTML = `<div class="npcpv-settings-title">NPC预览表</div><button class="npcpv-btn primary" type="button">打开NPC预览表</button><div class="npcpv-small">如果移动端悬浮按钮被遮挡，可从这里打开。</div>`;
-    wrap.querySelector('button').addEventListener('click', openPanel);
-    host.appendChild(wrap);
+    document.getElementById('npcpv-settings-entry')?.remove();
   }
 
   async function readDb() {
@@ -941,7 +934,16 @@
     btn.className = 'npcpv-open-button';
     btn.title = 'NPC预览表：点击打开，拖动移动位置';
     btn.addEventListener('pointerdown', startButtonDrag);
-    btn.addEventListener('click', e => { if (!buttonDrag?.moved) openPanel(e); });
+    btn.addEventListener('click', e => {
+      if (suppressNextClick) {
+        suppressNextClick = false;
+        return;
+      }
+      openPanel(e).catch(err => {
+        console.error('[NPC预览表] 打开面板失败', err);
+        alert('NPC预览表打开失败：' + (err?.message || String(err || '未知错误')));
+      });
+    });
     document.body.appendChild(btn);
     applyButtonSettings();
   }
@@ -1031,9 +1033,16 @@
       btn.style.bottom = 'auto';
     };
     const up = () => {
-      if (buttonDrag?.moved) {
+      const moved = !!buttonDrag?.moved;
+      if (moved) {
         const cfg = buttonSettings();
         saveButtonSettings({ ...cfg, x: parseFloat(btn.style.left), y: parseFloat(btn.style.top) });
+      } else {
+        suppressNextClick = true;
+        openPanel().catch(err => {
+          console.error('[NPC预览表] 打开面板失败', err);
+          alert('NPC预览表打开失败：' + (err?.message || String(err || '未知错误')));
+        });
       }
       setTimeout(() => { buttonDrag = null; }, 0);
       window.removeEventListener('pointermove', move);
