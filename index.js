@@ -34,6 +34,7 @@
   let buttonDrag = null;
   let dbMissingColumns = [];
   let liveUpdateBound = false;
+  let settingsEntryBound = false;
 
   function ctxKey(prefix) {
     try {
@@ -450,9 +451,12 @@
     const current = await readDb() || [];
     const found = current.find(r => r['NPC名称'] === item['NPC名称']);
     const payload = dbRowPayload(item);
-    if (found) return api.updateRow(TABLE_NAME, found.rowIndex, payload);
+    if (found) {
+      const result = await api.updateRow(TABLE_NAME, found.rowIndex, payload);
+      return result !== false && result !== -1 && result != null;
+    }
     const ok = await api.insertRow(TABLE_NAME, payload);
-    return ok && ok !== -1;
+    return ok !== false && ok !== -1 && ok != null;
   }
 
   async function syncAiFromChat(e) {
@@ -498,15 +502,17 @@
       return;
     }
     let ok = 0;
+    let attempted = 0;
     for (const item of list) {
       if (!item?.NPC名称) continue;
+      attempted++;
       if (await upsertDbNpc(item)) ok++;
-      if (ok % 10 === 0) await sleep(0);
+      if (attempted % 10 === 0) await sleep(0);
     }
     if (api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
     await loadRows();
     render();
-    showNotice(`AI同步完成：写入/更新 ${ok} 个 NPC。`);
+    showNotice(`AI同步完成：模型识别 ${list.length} 条，尝试写入 ${attempted} 条，确认成功 ${ok} 条。若确认成功为 0，请检查 NPC预览表 是否存在且列名完全匹配。`);
     finish();
     } catch (err) {
       console.error('[NPC预览表] AI同步失败', err);
@@ -524,6 +530,19 @@
       await loadRows();
       render();
     });
+  }
+
+  function bindSettingsEntry() {
+    if (settingsEntryBound) return;
+    const host = document.querySelector('#extensions_settings2') || document.querySelector('#extensions_settings') || document.querySelector('#third_party_extension_settings') || document.querySelector('.extensions_settings');
+    if (!host) return;
+    settingsEntryBound = true;
+    const wrap = document.createElement('div');
+    wrap.id = 'npcpv-settings-entry';
+    wrap.className = 'npcpv-settings-entry';
+    wrap.innerHTML = `<div class="npcpv-settings-title">NPC预览表</div><button class="npcpv-btn primary" type="button">打开NPC预览表</button><div class="npcpv-small">如果移动端悬浮按钮被遮挡，可从这里打开。</div>`;
+    wrap.querySelector('button').addEventListener('click', openPanel);
+    host.appendChild(wrap);
   }
 
   async function readDb() {
@@ -906,6 +925,7 @@
 
   function ensureButton() {
     if (document.getElementById(BUTTON_ID)) return;
+    if (!document.body) return;
     const btn = document.createElement('button');
     btn.id = BUTTON_ID;
     btn.className = 'npcpv-open-button';
@@ -914,6 +934,12 @@
     btn.addEventListener('click', e => { if (!buttonDrag?.moved) openPanel(e); });
     document.body.appendChild(btn);
     applyButtonSettings();
+  }
+
+  function boot() {
+    ensureButton();
+    bindSettingsEntry();
+    bindLiveUpdates();
   }
 
   function applyButtonSettings() {
@@ -978,9 +1004,10 @@
   }
 
   window.NPCPreviewOpen = openPanel;
-  ensureButton();
-  bindLiveUpdates();
-  setTimeout(ensureButton, 2000);
-  setTimeout(ensureButton, 6000);
+  boot();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+  setTimeout(boot, 500);
+  setTimeout(boot, 2000);
+  setTimeout(boot, 6000);
   setTimeout(bindLiveUpdates, 3000);
 })();

@@ -3,9 +3,12 @@
   "loading_order": 50,
   "requires": [],
   "optional": [],
+  "dependencies": [],
   "js": "index.js",
   "css": "style.css",
   "author": "Kilo Code",
   "version": "1.0",
-  "homePage": ""
+  "homePage": "",
+  "auto_update": false,
+  "minimum_client_version": "1.12.0"
 }
