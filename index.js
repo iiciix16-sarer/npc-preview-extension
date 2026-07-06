@@ -36,7 +36,7 @@
   let liveUpdateBound = false;
   let settingsEntryBound = false;
   let buttonObserver = null;
-  let suppressNextClick = false;
+  let lastButtonOpenAt = 0;
 
   function ctxKey(prefix) {
     try {
@@ -914,12 +914,22 @@
   async function openPanel() {
     updateViewportVars();
     bindLiveUpdates();
-    await loadRows();
     let root = document.getElementById(PANEL_ID);
     if (!root) {
       root = document.createElement('div');
       root.id = PANEL_ID;
       document.body.appendChild(root);
+    }
+    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
+    root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
+    root.querySelector('[data-close]')?.addEventListener('click', e => { if (e.target.dataset.close) closePanel(); });
+    applyPanelTheme(root);
+    try {
+      await loadRows();
+    } catch (err) {
+      console.error('[NPC预览表] 读取数据失败', err);
+      rows = [];
+      mode = '变量模式';
     }
     render();
   }
@@ -934,15 +944,16 @@
     btn.className = 'npcpv-open-button';
     btn.title = 'NPC预览表：点击打开，拖动移动位置';
     btn.addEventListener('pointerdown', startButtonDrag);
+    btn.addEventListener('touchend', e => {
+      if (Date.now() - lastButtonOpenAt < 450) return;
+      lastButtonOpenAt = Date.now();
+      e.preventDefault();
+      openPanel().catch(reportOpenError);
+    }, { passive: false });
     btn.addEventListener('click', e => {
-      if (suppressNextClick) {
-        suppressNextClick = false;
-        return;
-      }
-      openPanel(e).catch(err => {
-        console.error('[NPC预览表] 打开面板失败', err);
-        alert('NPC预览表打开失败：' + (err?.message || String(err || '未知错误')));
-      });
+      if (Date.now() - lastButtonOpenAt < 450) return;
+      lastButtonOpenAt = Date.now();
+      openPanel(e).catch(reportOpenError);
     });
     document.body.appendChild(btn);
     applyButtonSettings();
@@ -1038,11 +1049,10 @@
         const cfg = buttonSettings();
         saveButtonSettings({ ...cfg, x: parseFloat(btn.style.left), y: parseFloat(btn.style.top) });
       } else {
-        suppressNextClick = true;
-        openPanel().catch(err => {
-          console.error('[NPC预览表] 打开面板失败', err);
-          alert('NPC预览表打开失败：' + (err?.message || String(err || '未知错误')));
-        });
+        if (Date.now() - lastButtonOpenAt >= 450) {
+          lastButtonOpenAt = Date.now();
+          openPanel().catch(reportOpenError);
+        }
       }
       setTimeout(() => { buttonDrag = null; }, 0);
       window.removeEventListener('pointermove', move);
@@ -1050,6 +1060,11 @@
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+  }
+
+  function reportOpenError(err) {
+    console.error('[NPC预览表] 打开面板失败', err);
+    alert('NPC预览表打开失败：' + (err?.message || String(err || '未知错误')));
   }
 
   window.NPCPreviewOpen = openPanel;
