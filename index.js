@@ -376,10 +376,12 @@
 
   function getChatTextForAi() {
     const api = dbApi();
-    if (api?.getStoryContext) {
-      const text = api.getStoryContext(30);
-      if (text) return String(text);
-    }
+    try {
+      if (api?.getStoryContext) {
+        const text = api.getStoryContext(30);
+        if (text) return String(text);
+      }
+    } catch (err) { console.warn('[NPC预览表] getStoryContext 失败', err); }
     const th = window.TavernHelper;
     try {
       if (th?.getLastMessageId && th?.getChatMessages) {
@@ -387,7 +389,11 @@
         const messages = th.getChatMessages(`0-${last}`, { include_swipes: false }) || [];
         return messages.map((m, i) => `#${i}\n${m.message || m.mes || m.content || ''}`).join('\n\n').slice(-60000);
       }
-    } catch (_) {}
+    } catch (err) { console.warn('[NPC预览表] TavernHelper 读取聊天失败', err); }
+    try {
+      const ctx = window.SillyTavern?.getContext?.();
+      if (Array.isArray(ctx?.chat)) return ctx.chat.map((m, i) => `#${i}\n${m.mes || m.message || m.content || ''}`).join('\n\n').slice(-60000);
+    } catch (err) { console.warn('[NPC预览表] getContext.chat 读取失败', err); }
     return '';
   }
 
@@ -413,29 +419,46 @@
     return ok && ok !== -1;
   }
 
-  async function syncAiFromChat() {
+  async function syncAiFromChat(e) {
+    const btn = e?.currentTarget;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '同步中...';
+    }
+    const finish = () => {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'AI同步';
+      }
+    };
+    try {
     const api = dbApi();
     if (!api?.callAI) {
       showNotice('AI同步需要神数据库提供 AutoCardUpdaterAPI.callAI，并使用数据库插件或主 API 配置模型。');
+      finish();
       return;
     }
+    await loadRows();
     if (dbMissingColumns.length) {
       showNotice('NPC预览表缺少列：' + dbMissingColumns.join('、') + '。请先补齐数据库列，否则 AI 写入后也无法实时维护这些字段。');
+      finish();
       return;
     }
     const chat = getChatTextForAi();
     if (!chat) {
       showNotice('没有读取到聊天记录。可确认 TavernHelper 或神数据库 getStoryContext 是否可用。');
+      finish();
       return;
     }
-    showNotice('AI同步已开始，会读取已有聊天记录并写入 NPC预览表。请等待模型返回。');
+    console.log('[NPC预览表] AI同步开始，聊天文本长度:', chat.length);
     const response = await api.callAI([
       { role: 'system', content: '你是 NPC 数据整理器。只输出 JSON 数组，不要解释。字段必须为：NPC名称, 势力, 身份, 好感度, 状态, 心情, 备注, 首次登场, 登场事件, NPC关系, 好感历史。好感历史输出 JSON 字符串数组或 []。如果未知就留空或 0。' },
       { role: 'user', content: `请从以下已有聊天记录中整理出现过的 NPC，并补全可判断的信息。只输出 JSON 数组：\n\n${chat}` },
     ], { maxTokens: 4000 });
     const list = extractJsonArray(response);
     if (!list.length) {
-      showNotice('AI同步没有解析到可写入的 JSON 数组。');
+      showNotice('AI同步没有解析到可写入的 JSON 数组。模型返回开头：' + String(response || '').slice(0, 240));
+      finish();
       return;
     }
     let ok = 0;
@@ -448,6 +471,12 @@
     await loadRows();
     render();
     showNotice(`AI同步完成：写入/更新 ${ok} 个 NPC。`);
+    finish();
+    } catch (err) {
+      console.error('[NPC预览表] AI同步失败', err);
+      showNotice('AI同步失败：' + (err?.message || String(err || '未知错误')));
+      finish();
+    }
   }
 
   function bindLiveUpdates() {
