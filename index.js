@@ -91,6 +91,13 @@
     return m ? m[1].trim() : '';
   }
 
+  function splitNames(value) {
+    return String(value || '')
+      .split(/[、,，/|；;\n]/)
+      .map(v => v.replace(/(?:身份|势力|阵营|组织|职业|职位|职务|定位)\s*[:：].*$/g, '').trim())
+      .filter(Boolean);
+  }
+
   function addCandidate(map, name, sourceText) {
     const clean = normalizeName(name);
     if (!clean || clean.length < 2 || clean.length > 18) return;
@@ -121,20 +128,37 @@
     }
   }
 
-  function scanSourceTexts() {
+  function collectStructuredNpcNames(value, map, depth) {
+    if (value == null || (depth || 0) > 8) return;
+    if (Array.isArray(value)) {
+      value.forEach(v => collectStructuredNpcNames(v, map, (depth || 0) + 1));
+      return;
+    }
+    if (typeof value !== 'object') return;
+    const keys = Object.keys(value);
+    const nameKey = keys.find(k => /^(npc名称|npc名字|npc姓名|npc_name|npcName|npc|name|名称|姓名|名字)$/i.test(k));
+    if (nameKey && (keys.some(k => /npc/i.test(k)) || keys.some(k => /^(身份|势力|阵营|组织|职业|职位|职务|定位|好感度|状态|心情)$/i.test(k)))) {
+      splitNames(value[nameKey]).forEach(name => addCandidate(map, name, JSON.stringify(value).slice(0, 500)));
+    }
+    keys.forEach(k => collectStructuredNpcNames(value[k], map, (depth || 0) + 1));
+  }
+
+  function scanSourceData() {
     const texts = [];
+    const objects = [];
     try {
       const ctx = window.SillyTavern?.getContext?.();
       const charId = ctx?.characterId ?? window.SillyTavern?.characterId ?? window.characterId ?? window.this_chid;
       const characters = ctx?.characters ?? window.SillyTavern?.characters ?? window.characters;
       const ch = characters?.[charId] || ctx?.character || ctx?.characterData || null;
+      objects.push(ch, ch?.data, ch?.data?.character_book, ctx?.extensionSettings?.character);
       collectText(ch, texts);
       collectText(ch?.data, texts);
       collectText(ch?.data?.character_book, texts);
       collectText(ctx?.world_names, texts);
       collectText(ctx?.extensionSettings?.character, texts);
     } catch (_) {}
-    return texts;
+    return { texts, objects };
   }
 
   function textSignature(texts) {
@@ -144,21 +168,18 @@
     return `${joined.length}:${hash}`;
   }
 
-  function scanNpcCandidates(texts) {
+  function scanNpcCandidates(texts, objects) {
     const map = new Map();
+    (objects || []).forEach(obj => collectStructuredNpcNames(obj, map));
     for (const text of texts) {
       const lines = String(text).split(/\r?\n/).filter(Boolean);
       for (const line of lines) {
-        if (!/(NPC|npc|角色|人物|姓名|名称|配角|同伴|敌人|势力|身份|阵营|组织|所属|职业|职位|职务|定位|关系)/.test(line)) continue;
+        if (!/(NPC|npc|npc名称|NPC名称|NPC姓名|NPC名字|NPC名单|NPC目录|npc_name|npcName)/.test(line)) continue;
         let m;
-        const direct = /(?:NPC|角色|人物|姓名|名称)\s*[:：]\s*([^，。；;、\n]{2,18})/g;
-        while ((m = direct.exec(line))) addCandidate(map, m[1], line);
-        const named = /(?:^|[，。；;、\s])([^，。；;、\s:：]{2,12})\s*(?:-|—|：|:)\s*(?=.*(?:身份|势力|阵营|组织|职业|职位|关系|好感|状态))/g;
-        while ((m = named.exec(line))) addCandidate(map, m[1], line);
-        const bracket = /[【\[]([^【】\[\]\n]{2,18})[】\]]/g;
-        while ((m = bracket.exec(line))) addCandidate(map, m[1], line);
-        const list = /^\s*(?:[-*•]|\d+[.、])\s*([^：:，。；;\n]{2,18})\s*[:：]/.exec(line);
-        if (list) addCandidate(map, list[1], line);
+        const direct = /(?:NPC(?:名称|姓名|名字)?|npc(?:_?name)?)\s*[:：=]\s*([^。；;\n]{2,80})/gi;
+        while ((m = direct.exec(line))) splitNames(m[1]).forEach(name => addCandidate(map, name, line));
+        const listHeader = /NPC(?:名单|目录|列表)\s*[:：]\s*([^。；;\n]{2,120})/i.exec(line);
+        if (listHeader) splitNames(listHeader[1]).forEach(name => addCandidate(map, name, line));
       }
     }
     return Array.from(map.values());
@@ -168,10 +189,11 @@
     if (autoSyncing) return { scanned: 0, found: 0, added: 0, dbAdded: 0, skipped: true };
     autoSyncing = true;
     try {
-      const texts = scanSourceTexts();
+      const source = scanSourceData();
+      const texts = source.texts;
       const signature = textSignature(texts);
       if (!force && signature && scanState().signature === signature) return { scanned: texts.length, found: 0, added: 0, dbAdded: 0, cached: true };
-      const found = scanNpcCandidates(texts);
+      const found = scanNpcCandidates(texts, source.objects);
       saveScanState({ signature });
       if (!found.length) return { scanned: texts.length, found: 0, added: 0, dbAdded: 0 };
       const byName = new Set(registry().map(n => n.name));
@@ -329,6 +351,27 @@
     render();
   }
 
+  async function clearAllNpcs() {
+    if (!confirm('确定清空当前角色卡的全部NPC目录？')) return;
+    if (mode === '数据库模式' && dbApi()?.deleteRow) {
+      const api = dbApi();
+      const dbRows = await readDb();
+      if (dbRows) {
+        for (let i = dbRows.length - 1; i >= 0; i--) await api.deleteRow(TABLE_NAME, dbRows[i].rowIndex);
+        if (api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
+      }
+    }
+    saveRegistry([]);
+    selectedId = null;
+    filter = '全部';
+    query = '';
+    saveScanState({ signature: textSignature(scanSourceData().texts) });
+    rows = [];
+    mode = dbApi()?.exportTableAsJson ? '数据库模式' : '变量模式';
+    render();
+    showNotice('已清空当前角色卡的NPC目录。');
+  }
+
   function filteredRows() {
     const q = query.trim().toLowerCase();
     let list = rows;
@@ -359,7 +402,7 @@
     const selected = rows.find(r => String(r.id) === String(selectedId));
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const cards = filteredRows().map(r => cardHtml(r, selected && String(r.id) === String(selected.id))).join('');
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn" data-action="rescan">重扫角色卡</button><button class="npcpv-btn" data-action="button-settings">按钮</button><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn primary" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cards || '<div class="npcpv-empty" style="grid-column:1/-1">未识别到NPC<br>可点「重扫角色卡」或手动添加</div>'}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>打开角色卡后会自动扫描目录</div>'}</div></div></div></div>`;
+    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn" data-action="rescan">重扫角色卡</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">按钮</button><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn primary" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cards || '<div class="npcpv-empty" style="grid-column:1/-1">未识别到NPC<br>可点「重扫角色卡」或手动添加</div>'}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>打开角色卡后会自动扫描目录</div>'}</div></div></div></div>`;
     bindEvents(root);
   }
 
@@ -371,6 +414,7 @@
     root.querySelector('[data-action="api"]')?.addEventListener('click', showApiDialog);
     root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
     root.querySelector('[data-action="rescan"]')?.addEventListener('click', handleRescan);
+    root.querySelector('[data-action="clear-all"]')?.addEventListener('click', clearAllNpcs);
     root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
     root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; render(); }));
     root.querySelectorAll('.npcpv-card').forEach(card => card.addEventListener('click', () => { selectedId = card.dataset.id; render(); }));
