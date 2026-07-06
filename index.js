@@ -1,0 +1,340 @@
+(function () {
+  'use strict';
+
+  const PANEL_ID = 'npc-preview-modal';
+  const BUTTON_ID = 'npc-preview-open';
+  const TABLE_NAME = 'NPC预览表';
+  const VAR_PREFIX = 'NPC_';
+  const REG_PREFIX = 'npc_preview_registry_';
+  const AVATAR_PREFIX = 'npc_preview_avatars_';
+  const API_PREFIX = 'npc_preview_api_';
+
+  const STATUSES = [
+    ['offline', '离线', '#9e9e9e'],
+    ['online', '在线', '#43a047'],
+    ['away', '忙碌', '#f9a825'],
+    ['danger', '危险', '#e53935'],
+    ['missing', '失踪', '#6d4c41'],
+  ];
+
+  const MOODS = [
+    ['calm', '平静', '😌'], ['happy', '愉悦', '😊'], ['angry', '愤怒', '😤'],
+    ['sad', '悲伤', '😢'], ['fear', '恐惧', '😰'], ['love', '爱意', '❤️'],
+    ['jealous', '嫉妒', '🤢'], ['annoyed', '烦躁', '😒'], ['excited', '兴奋', '🤩'],
+    ['shy', '害羞', '😳'], ['guilty', '心虚', '😅'], ['cold', '冷漠', '🧊'],
+  ];
+
+  let rows = [];
+  let selectedId = null;
+  let mode = '变量模式';
+  let filter = '全部';
+  let query = '';
+
+  function ctxKey(prefix) {
+    try {
+      const ctx = window.SillyTavern?.getContext?.();
+      if (ctx && ctx.characterId != null) return prefix + ctx.characterId;
+    } catch (_) {}
+    return prefix + 'global';
+  }
+
+  function parse(raw, fallback) {
+    try { return JSON.parse(raw); } catch (_) { return fallback; }
+  }
+
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[s]));
+  }
+
+  function keyName(name) {
+    return String(name || '').replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
+  }
+
+  function registry() { return parse(localStorage.getItem(ctxKey(REG_PREFIX)) || '[]', []); }
+  function saveRegistry(value) { localStorage.setItem(ctxKey(REG_PREFIX), JSON.stringify(value)); }
+  function avatars() { return parse(localStorage.getItem(ctxKey(AVATAR_PREFIX)) || '{}', {}); }
+  function saveAvatars(value) { localStorage.setItem(ctxKey(AVATAR_PREFIX), JSON.stringify(value)); }
+  function apiConfig() { return parse(localStorage.getItem(ctxKey(API_PREFIX)) || 'null', { baseUrl: '', apiKey: '', model: '' }) || { baseUrl: '', apiKey: '', model: '' }; }
+  function saveApiConfig(value) { localStorage.setItem(ctxKey(API_PREFIX), JSON.stringify(value)); }
+
+  function statusOf(value) { return STATUSES.find(x => x[0] === value) || STATUSES[0]; }
+  function moodOf(value) { return MOODS.find(x => x[0] === value) || MOODS[0]; }
+  function affectionColor(value) {
+    const n = Number(value) || 0;
+    if (n < 0) return '#e53935';
+    if (n >= 80) return '#2e7d32';
+    if (n >= 50) return '#43a047';
+    if (n >= 20) return '#81c784';
+    if (n > 0) return '#c8e6c9';
+    return '#bdbdbd';
+  }
+
+  async function getVar(key, fallback) {
+    try {
+      const context = window.SillyTavern?.getContext?.();
+      if (context?.chatMetadata) {
+        const value = context.chatMetadata[key];
+        return value == null || value === '' ? fallback : value;
+      }
+    } catch (_) {}
+    const value = localStorage.getItem(ctxKey('npcv_' + key + '_'));
+    return value == null || value === '' ? fallback : value;
+  }
+
+  async function setVar(key, value) {
+    try {
+      const context = window.SillyTavern?.getContext?.();
+      if (context?.chatMetadata) {
+        context.chatMetadata[key] = value;
+        if (context.saveMetadata) await context.saveMetadata();
+        return;
+      }
+    } catch (_) {}
+    localStorage.setItem(ctxKey('npcv_' + key + '_'), String(value));
+  }
+
+  function dbApi() { return window.AutoCardUpdaterAPI || null; }
+
+  async function readDb() {
+    const api = dbApi();
+    if (!api?.exportTableAsJson) return null;
+    try {
+      const raw = api.exportTableAsJson(TABLE_NAME);
+      if (!raw) return null;
+      const table = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!table?.content || !Array.isArray(table.content) || table.content.length < 2) return null;
+      const headers = table.content[0];
+      if (!headers.includes('NPC名称') || !headers.includes('好感度')) return null;
+      return table.content.slice(1).map((row, index) => {
+        const item = { id: 'db_' + (index + 1), rowIndex: index + 1, source: 'db' };
+        headers.forEach((h, i) => { item[h] = row[i] == null ? '' : row[i]; });
+        return item;
+      });
+    } catch (_) { return null; }
+  }
+
+  async function readVars() {
+    const result = [];
+    for (const npc of registry()) {
+      const key = keyName(npc.name);
+      result.push({
+        id: String(npc.id),
+        rowIndex: npc.id,
+        source: 'var',
+        'NPC名称': npc.name,
+        '势力': npc.faction || '',
+        '身份': npc.identity || '',
+        '好感度': Number(await getVar(VAR_PREFIX + key + '_好感', 0)) || 0,
+        '状态': await getVar(VAR_PREFIX + key + '_状态', 'offline'),
+        '心情': await getVar(VAR_PREFIX + key + '_心情', 'calm'),
+        '备注': await getVar(VAR_PREFIX + key + '_备注', ''),
+      });
+    }
+    return result;
+  }
+
+  async function loadRows() {
+    const dbRows = await readDb();
+    if (dbRows && dbRows.length) {
+      mode = '数据库模式';
+      rows = dbRows;
+    } else {
+      mode = '变量模式';
+      rows = await readVars();
+    }
+  }
+
+  async function writeField(row, field, value) {
+    if (row.source === 'db') {
+      const api = dbApi();
+      if (api?.updateRow) {
+        const ok = await api.updateRow(TABLE_NAME, row.rowIndex, { [field]: value });
+        if (ok && api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
+      }
+    } else {
+      const key = keyName(row['NPC名称']);
+      if (field === '好感度') await setVar(VAR_PREFIX + key + '_好感', value);
+      if (field === '状态') await setVar(VAR_PREFIX + key + '_状态', value);
+      if (field === '心情') await setVar(VAR_PREFIX + key + '_心情', value);
+      if (field === '备注') await setVar(VAR_PREFIX + key + '_备注', value);
+    }
+    await loadRows();
+    render();
+  }
+
+  async function addNpc(name, faction, identity) {
+    if (mode === '数据库模式' && dbApi()?.insertRow) {
+      const ok = await dbApi().insertRow(TABLE_NAME, { 'NPC名称': name, '势力': faction, '身份': identity, '好感度': 0, '状态': 'offline', '心情': 'calm', '备注': '' });
+      if (ok && dbApi().refreshDataAndWorldbook) await dbApi().refreshDataAndWorldbook();
+    } else {
+      const reg = registry();
+      const id = Date.now() + Math.random();
+      reg.push({ id, name, faction, identity });
+      saveRegistry(reg);
+      const key = keyName(name);
+      await setVar(VAR_PREFIX + key + '_好感', 0);
+      await setVar(VAR_PREFIX + key + '_状态', 'offline');
+      await setVar(VAR_PREFIX + key + '_心情', 'calm');
+      await setVar(VAR_PREFIX + key + '_备注', '');
+    }
+    await loadRows();
+    selectedId = rows.find(r => r['NPC名称'] === name)?.id || selectedId;
+    render();
+  }
+
+  async function deleteNpc(row) {
+    if (row.source === 'db' && dbApi()?.deleteRow) {
+      const ok = await dbApi().deleteRow(TABLE_NAME, row.rowIndex);
+      if (ok && dbApi().refreshDataAndWorldbook) await dbApi().refreshDataAndWorldbook();
+    } else {
+      saveRegistry(registry().filter(n => String(n.id) !== String(row.id)));
+    }
+    selectedId = null;
+    await loadRows();
+    render();
+  }
+
+  function filteredRows() {
+    const q = query.trim().toLowerCase();
+    let list = rows;
+    if (filter !== '全部') list = list.filter(r => (r['势力'] || '') === filter);
+    if (q) list = list.filter(r => (r['NPC名称'] || '').toLowerCase().includes(q) || (r['势力'] || '').toLowerCase().includes(q) || (r['身份'] || '').toLowerCase().includes(q));
+    return list;
+  }
+
+  function cardHtml(row, active) {
+    const name = row['NPC名称'] || '?';
+    const aff = Number(row['好感度']) || 0;
+    const st = statusOf(row['状态']);
+    const avatar = avatars()[name];
+    return `<div class="npcpv-card ${active ? 'active' : ''}" data-id="${esc(row.id)}"><div class="npcpv-dot" style="background:${st[2]}"></div><div class="npcpv-avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}</div><div class="npcpv-name">${esc(name)}</div><div class="npcpv-faction">${esc(row['势力'] || '未分组')}</div><div class="npcpv-bar"><div class="npcpv-fill" style="width:${Math.min(Math.abs(aff), 100)}%;background:${affectionColor(aff)}"></div></div></div>`;
+  }
+
+  function detailHtml(row) {
+    const name = row['NPC名称'] || '?';
+    const aff = Number(row['好感度']) || 0;
+    const mood = moodOf(row['心情']);
+    const avatar = avatars()[name];
+    return `<div class="npcpv-profile"><div class="npcpv-big-avatar" data-action="avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}<span>上传头像</span></div><div><div class="npcpv-main-name">${esc(name)}</div><div class="npcpv-main-sub">${esc(row['势力'] || '未分组')}</div><div class="npcpv-main-sub">${esc(row['身份'] || '')}</div></div></div><div class="npcpv-section"><div class="npcpv-label">好感度 <span class="npcpv-small">${mode === '数据库模式' ? '数据库列：好感度' : '变量：' + VAR_PREFIX + keyName(name) + '_好感'}</span></div><div class="npcpv-aff"><div class="npcpv-affbar"><div class="npcpv-afffill" style="width:${Math.min(Math.abs(aff),100)}%;background:${affectionColor(aff)}"></div></div><div class="npcpv-affval" style="color:${affectionColor(aff)}">${aff}</div></div><div class="npcpv-ctrls">${[-10,-5,-1,1,5,10].map(n => `<button class="npcpv-btn" data-action="aff" data-delta="${n}">${n > 0 ? '+' : ''}${n}</button>`).join('')}</div></div><div class="npcpv-section"><div class="npcpv-label">状态</div><select class="npcpv-select" data-action="status">${STATUSES.map(s => `<option value="${s[0]}" ${s[0] === (row['状态'] || 'offline') ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">心情 <span class="npcpv-small">${mood[2]}</span></div><select class="npcpv-select" data-action="mood">${MOODS.map(m => `<option value="${m[0]}" ${m[0] === (row['心情'] || 'calm') ? 'selected' : ''}>${m[2]} ${m[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">备注</div><textarea class="npcpv-textarea" data-action="notes">${esc(row['备注'] || '')}</textarea></div><div class="npcpv-ctrls"><button class="npcpv-btn danger" data-action="delete">删除NPC</button></div>`;
+  }
+
+  function render() {
+    const root = document.getElementById(PANEL_ID);
+    if (!root) return;
+    const selected = rows.find(r => String(r.id) === String(selectedId));
+    const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
+    const cards = filteredRows().map(r => cardHtml(r, selected && String(r.id) === String(selected.id))).join('');
+    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn primary" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cards || '<div class="npcpv-empty" style="grid-column:1/-1">暂无NPC<br>点击「+ 新NPC」添加</div>'}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或点击「+ 新NPC」创建角色记录</div>'}</div></div></div></div>`;
+    bindEvents(root);
+  }
+
+  function bindEvents(root) {
+    const selected = rows.find(r => String(r.id) === String(selectedId));
+    root.querySelector('[data-close]')?.addEventListener('click', e => { if (e.target.dataset.close) closePanel(); });
+    root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
+    root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
+    root.querySelector('[data-action="api"]')?.addEventListener('click', showApiDialog);
+    root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
+    root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; render(); }));
+    root.querySelectorAll('.npcpv-card').forEach(card => card.addEventListener('click', () => { selectedId = card.dataset.id; render(); }));
+    if (!selected) return;
+    root.querySelectorAll('[data-action="aff"]').forEach(btn => btn.addEventListener('click', () => writeField(selected, '好感度', Math.max(-100, Math.min(100, (Number(selected['好感度']) || 0) + Number(btn.dataset.delta))))));
+    root.querySelector('[data-action="status"]')?.addEventListener('change', e => writeField(selected, '状态', e.target.value));
+    root.querySelector('[data-action="mood"]')?.addEventListener('change', e => writeField(selected, '心情', e.target.value));
+    let timer;
+    root.querySelector('[data-action="notes"]')?.addEventListener('input', e => { clearTimeout(timer); timer = setTimeout(() => writeField(selected, '备注', e.target.value), 500); });
+    root.querySelector('[data-action="delete"]')?.addEventListener('click', () => { if (confirm('删除这个NPC？')) deleteNpc(selected); });
+    root.querySelector('[data-action="avatar"]')?.addEventListener('click', () => uploadAvatar(selected));
+  }
+
+  function showSubDialog(html, after) {
+    const root = document.getElementById(PANEL_ID);
+    const div = document.createElement('div');
+    div.className = 'npcpv-modal-sub';
+    div.id = 'npcpv-subdialog';
+    div.innerHTML = `<div class="npcpv-dialog">${html}</div>`;
+    root.querySelector('.npcpv-modal').appendChild(div);
+    div.querySelectorAll('[data-subclose]').forEach(b => b.addEventListener('click', closeSubDialog));
+    if (after) after();
+  }
+
+  function closeSubDialog() { document.getElementById('npcpv-subdialog')?.remove(); }
+
+  function showAddDialog() {
+    showSubDialog(`<h3>添加NPC</h3><div class="npcpv-form"><input class="npcpv-input" id="npc-add-name" placeholder="NPC名称 *"><input class="npcpv-input" id="npc-add-faction" placeholder="势力/分组"><input class="npcpv-input" id="npc-add-identity" placeholder="身份/职位"></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-add-ok">添加</button></div>`, () => {
+      document.getElementById('npc-add-ok').onclick = () => {
+        const name = document.getElementById('npc-add-name').value.trim();
+        if (!name) return;
+        addNpc(name, document.getElementById('npc-add-faction').value.trim(), document.getElementById('npc-add-identity').value.trim());
+        closeSubDialog();
+      };
+    });
+  }
+
+  function showApiDialog() {
+    const cfg = apiConfig();
+    showSubDialog(`<h3>API配置</h3><div class="npcpv-form"><input class="npcpv-input" id="npc-api-url" placeholder="Base URL，例如 https://api.openai.com/v1" value="${esc(cfg.baseUrl)}"><input class="npcpv-input" id="npc-api-key" type="password" placeholder="API Key" value="${esc(cfg.apiKey)}"><input class="npcpv-input" id="npc-api-model" placeholder="Model，例如 gpt-4o-mini" value="${esc(cfg.model)}"></div><div class="npcpv-small" style="margin-top:8px">配置只保存在本地浏览器。</div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-api-ok">保存</button></div>`, () => {
+      document.getElementById('npc-api-ok').onclick = () => {
+        saveApiConfig({ baseUrl: document.getElementById('npc-api-url').value.trim(), apiKey: document.getElementById('npc-api-key').value.trim(), model: document.getElementById('npc-api-model').value.trim() });
+        closeSubDialog();
+      };
+    });
+  }
+
+  function uploadAvatar(item) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 220;
+          canvas.height = 220;
+          const ctx = canvas.getContext('2d');
+          const min = Math.min(img.width, img.height);
+          ctx.drawImage(img, (img.width - min) / 2, (img.height - min) / 2, min, min, 0, 0, 220, 220);
+          const av = avatars();
+          av[item['NPC名称']] = canvas.toDataURL('image/jpeg', 0.82);
+          saveAvatars(av);
+          render();
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }
+
+  async function openPanel() {
+    await loadRows();
+    let root = document.getElementById(PANEL_ID);
+    if (!root) {
+      root = document.createElement('div');
+      root.id = PANEL_ID;
+      document.body.appendChild(root);
+    }
+    render();
+  }
+
+  function closePanel() { document.getElementById(PANEL_ID)?.remove(); }
+
+  function ensureButton() {
+    if (document.getElementById(BUTTON_ID)) return;
+    const btn = document.createElement('button');
+    btn.id = BUTTON_ID;
+    btn.className = 'npcpv-open-button';
+    btn.textContent = 'NPC预览表';
+    btn.onclick = openPanel;
+    document.body.appendChild(btn);
+  }
+
+  window.NPCPreviewOpen = openPanel;
+  ensureButton();
+  setTimeout(ensureButton, 2000);
+  setTimeout(ensureButton, 6000);
+})();

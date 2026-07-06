@@ -1,0 +1,11 @@
+{
+  "display_name": "NPC预览表",
+  "loading_order": 50,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Kilo Code",
+  "version": "1.0.0",
+  "homePage": ""
+}
