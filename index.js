@@ -7,7 +7,6 @@
   const VAR_PREFIX = 'NPC_';
   const REG_PREFIX = 'npc_preview_registry_';
   const AVATAR_PREFIX = 'npc_preview_avatars_';
-  const API_PREFIX = 'npc_preview_api_';
   const SETTINGS_PREFIX = 'npc_preview_settings_';
   const EXTRA_PREFIX = 'npc_preview_extra_';
   const REQUIRED_COLUMNS = ['NPC名称', '势力', '身份', '好感度', '状态', '心情', '备注', '首次登场', '登场事件', 'NPC关系', '好感历史'];
@@ -60,8 +59,6 @@
   function saveRegistry(value) { localStorage.setItem(ctxKey(REG_PREFIX), JSON.stringify(value)); }
   function avatars() { return parse(localStorage.getItem(ctxKey(AVATAR_PREFIX)) || '{}', {}); }
   function saveAvatars(value) { localStorage.setItem(ctxKey(AVATAR_PREFIX), JSON.stringify(value)); }
-  function apiConfig() { return parse(localStorage.getItem(ctxKey(API_PREFIX)) || 'null', { baseUrl: '', apiKey: '', model: '' }) || { baseUrl: '', apiKey: '', model: '' }; }
-  function saveApiConfig(value) { localStorage.setItem(ctxKey(API_PREFIX), JSON.stringify(value)); }
   function buttonSettings() { return parse(localStorage.getItem(ctxKey(SETTINGS_PREFIX)) || 'null', defaultSettings()) || defaultSettings(); }
   function saveButtonSettings(value) { localStorage.setItem(ctxKey(SETTINGS_PREFIX), JSON.stringify(value)); }
   function extras() { return parse(localStorage.getItem(ctxKey(EXTRA_PREFIX)) || '{}', {}); }
@@ -377,6 +374,82 @@
 
   function dbApi() { return window.AutoCardUpdaterAPI || null; }
 
+  function getChatTextForAi() {
+    const api = dbApi();
+    if (api?.getStoryContext) {
+      const text = api.getStoryContext(30);
+      if (text) return String(text);
+    }
+    const th = window.TavernHelper;
+    try {
+      if (th?.getLastMessageId && th?.getChatMessages) {
+        const last = th.getLastMessageId();
+        const messages = th.getChatMessages(`0-${last}`, { include_swipes: false }) || [];
+        return messages.map((m, i) => `#${i}\n${m.message || m.mes || m.content || ''}`).join('\n\n').slice(-60000);
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  function extractJsonArray(text) {
+    const raw = String(text || '').trim();
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const body = fenced ? fenced[1].trim() : raw;
+    const start = body.indexOf('[');
+    const end = body.lastIndexOf(']');
+    if (start < 0 || end < start) return [];
+    const parsed = parse(body.slice(start, end + 1), []);
+    return Array.isArray(parsed) ? parsed : [];
+  }
+
+  async function upsertDbNpc(item) {
+    const api = dbApi();
+    if (!api?.insertRow || !api?.updateRow) return false;
+    const current = await readDb() || [];
+    const found = current.find(r => r['NPC名称'] === item['NPC名称']);
+    const payload = dbRowPayload(item);
+    if (found) return api.updateRow(TABLE_NAME, found.rowIndex, payload);
+    const ok = await api.insertRow(TABLE_NAME, payload);
+    return ok && ok !== -1;
+  }
+
+  async function syncAiFromChat() {
+    const api = dbApi();
+    if (!api?.callAI) {
+      showNotice('AI同步需要神数据库提供 AutoCardUpdaterAPI.callAI，并使用数据库插件或主 API 配置模型。');
+      return;
+    }
+    if (dbMissingColumns.length) {
+      showNotice('NPC预览表缺少列：' + dbMissingColumns.join('、') + '。请先补齐数据库列，否则 AI 写入后也无法实时维护这些字段。');
+      return;
+    }
+    const chat = getChatTextForAi();
+    if (!chat) {
+      showNotice('没有读取到聊天记录。可确认 TavernHelper 或神数据库 getStoryContext 是否可用。');
+      return;
+    }
+    showNotice('AI同步已开始，会读取已有聊天记录并写入 NPC预览表。请等待模型返回。');
+    const response = await api.callAI([
+      { role: 'system', content: '你是 NPC 数据整理器。只输出 JSON 数组，不要解释。字段必须为：NPC名称, 势力, 身份, 好感度, 状态, 心情, 备注, 首次登场, 登场事件, NPC关系, 好感历史。好感历史输出 JSON 字符串数组或 []。如果未知就留空或 0。' },
+      { role: 'user', content: `请从以下已有聊天记录中整理出现过的 NPC，并补全可判断的信息。只输出 JSON 数组：\n\n${chat}` },
+    ], { maxTokens: 4000 });
+    const list = extractJsonArray(response);
+    if (!list.length) {
+      showNotice('AI同步没有解析到可写入的 JSON 数组。');
+      return;
+    }
+    let ok = 0;
+    for (const item of list) {
+      if (!item?.NPC名称) continue;
+      if (await upsertDbNpc(item)) ok++;
+      if (ok % 10 === 0) await sleep(0);
+    }
+    if (api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
+    await loadRows();
+    render();
+    showNotice(`AI同步完成：写入/更新 ${ok} 个 NPC。`);
+  }
+
   function bindLiveUpdates() {
     const api = dbApi();
     if (liveUpdateBound || !api?.registerTableUpdateCallback) return;
@@ -573,7 +646,7 @@
     const selected = rows.find(r => String(r.id) === String(selectedId));
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const warn = mode === '数据库模式' && dbMissingColumns.length ? `<div class="npcpv-db-warn">数据库缺列：${esc(dbMissingColumns.join('、'))}。请补齐后 AI 才能实时维护这些字段。</div>` : '';
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
     applyPanelTheme(root);
     bindEvents(root);
   }
@@ -583,7 +656,7 @@
     root.querySelector('[data-close]')?.addEventListener('click', e => { if (e.target.dataset.close) closePanel(); });
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
-    root.querySelector('[data-action="api"]')?.addEventListener('click', showApiDialog);
+    root.querySelector('[data-action="ai-sync"]')?.addEventListener('click', syncAiFromChat);
     root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
     root.querySelector('[data-action="data-io"]')?.addEventListener('click', showDataDialog);
     root.querySelector('[data-action="batch-import"]')?.addEventListener('click', showBatchImportDialog);
@@ -704,16 +777,6 @@
         } catch (err) {
           showNotice('导入失败：' + (err?.message || 'JSON 格式错误'));
         }
-      };
-    });
-  }
-
-  function showApiDialog() {
-    const cfg = apiConfig();
-    showSubDialog(`<h3>API配置</h3><div class="npcpv-form"><input class="npcpv-input" id="npc-api-url" placeholder="Base URL，例如 https://api.openai.com/v1" value="${esc(cfg.baseUrl)}"><input class="npcpv-input" id="npc-api-key" type="password" placeholder="API Key" value="${esc(cfg.apiKey)}"><input class="npcpv-input" id="npc-api-model" placeholder="Model，例如 gpt-4o-mini" value="${esc(cfg.model)}"></div><div class="npcpv-small" style="margin-top:8px">配置只保存在本地浏览器。</div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-api-ok">保存</button></div>`, () => {
-      document.getElementById('npc-api-ok').onclick = () => {
-        saveApiConfig({ baseUrl: document.getElementById('npc-api-url').value.trim(), apiKey: document.getElementById('npc-api-key').value.trim(), model: document.getElementById('npc-api-model').value.trim() });
-        closeSubDialog();
       };
     });
   }
