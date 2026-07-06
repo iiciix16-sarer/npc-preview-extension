@@ -214,6 +214,8 @@
 .npcpv-dialog { width: min(420px, 100%); border: 1px solid #dcebdc; border-radius: 12px; padding: 16px; background: #fff; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
 .npcpv-dialog h3 { margin: 0 0 12px; color: #2e7d32; font-size: 16px; }
 .npcpv-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.npcpv-notice { color: #233323; font-size: 13px; line-height: 1.7; }
+.npcpv-btn:disabled { opacity: .55; cursor: wait; }
 
 @media (max-width: 640px) {
   .npcpv-mask { align-items: stretch; padding: 0; }

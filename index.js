@@ -102,19 +102,21 @@
     item.identity = item.identity || inferIdentity(sourceText);
   }
 
-  function collectText(value, out) {
+  function collectText(value, out, depth) {
     if (value == null) return;
+    if ((depth || 0) > 8) return;
     if (typeof value === 'string') {
-      out.push(value);
+      if (value.length > 1 && !/^data:image\//.test(value)) out.push(value);
       return;
     }
     if (Array.isArray(value)) {
-      value.forEach(v => collectText(v, out));
+      value.forEach(v => collectText(v, out, (depth || 0) + 1));
       return;
     }
     if (typeof value === 'object') {
       Object.keys(value).forEach(k => {
-        if (/^(content|comment|name|description|personality|scenario|first_mes|mes_example|creator_notes|system_prompt|post_history_instructions|entries|character_book|extensions)$/i.test(k)) collectText(value[k], out);
+        if (/^(avatar|chat|date_added|date_last_chat|create_date|last_mes|fav|fav_checkbox)$/i.test(k)) return;
+        collectText(value[k], out, (depth || 0) + 1);
       });
     }
   }
@@ -123,8 +125,14 @@
     const texts = [];
     try {
       const ctx = window.SillyTavern?.getContext?.();
-      const ch = ctx?.characters?.[ctx.characterId] || ctx?.character || null;
+      const charId = ctx?.characterId ?? window.SillyTavern?.characterId ?? window.characterId ?? window.this_chid;
+      const characters = ctx?.characters ?? window.SillyTavern?.characters ?? window.characters;
+      const ch = characters?.[charId] || ctx?.character || ctx?.characterData || null;
       collectText(ch, texts);
+      collectText(ch?.data, texts);
+      collectText(ch?.data?.character_book, texts);
+      collectText(ctx?.world_names, texts);
+      collectText(ctx?.extensionSettings?.character, texts);
     } catch (_) {}
     return texts;
   }
@@ -141,10 +149,12 @@
     for (const text of texts) {
       const lines = String(text).split(/\r?\n/).filter(Boolean);
       for (const line of lines) {
-        if (!/(NPC|npc|角色|人物|姓名|名称|配角|同伴|敌人|势力|身份)/.test(line)) continue;
+        if (!/(NPC|npc|角色|人物|姓名|名称|配角|同伴|敌人|势力|身份|阵营|组织|所属|职业|职位|职务|定位|关系)/.test(line)) continue;
         let m;
         const direct = /(?:NPC|角色|人物|姓名|名称)\s*[:：]\s*([^，。；;、\n]{2,18})/g;
         while ((m = direct.exec(line))) addCandidate(map, m[1], line);
+        const named = /(?:^|[，。；;、\s])([^，。；;、\s:：]{2,12})\s*(?:-|—|：|:)\s*(?=.*(?:身份|势力|阵营|组织|职业|职位|关系|好感|状态))/g;
+        while ((m = named.exec(line))) addCandidate(map, m[1], line);
         const bracket = /[【\[]([^【】\[\]\n]{2,18})[】\]]/g;
         while ((m = bracket.exec(line))) addCandidate(map, m[1], line);
         const list = /^\s*(?:[-*•]|\d+[.、])\s*([^：:，。；;\n]{2,18})\s*[:：]/.exec(line);
@@ -155,34 +165,39 @@
   }
 
   async function syncAutoNpcs(force) {
-    if (autoSyncing) return;
+    if (autoSyncing) return { scanned: 0, found: 0, added: 0, dbAdded: 0, skipped: true };
     autoSyncing = true;
     try {
       const texts = scanSourceTexts();
       const signature = textSignature(texts);
-      if (!force && signature && scanState().signature === signature) return;
+      if (!force && signature && scanState().signature === signature) return { scanned: texts.length, found: 0, added: 0, dbAdded: 0, cached: true };
       const found = scanNpcCandidates(texts);
       saveScanState({ signature });
-      if (!found.length) return;
+      if (!found.length) return { scanned: texts.length, found: 0, added: 0, dbAdded: 0 };
       const byName = new Set(registry().map(n => n.name));
       const next = registry();
+      let added = 0;
       for (const npc of found) {
         if (byName.has(npc.name)) continue;
         next.push({ id: Date.now() + Math.random(), name: npc.name, faction: npc.faction || '自动识别', identity: npc.identity || '' });
         byName.add(npc.name);
+        added++;
       }
       saveRegistry(next);
 
       const api = dbApi();
-      if (!api?.insertRow) return;
+      if (!api?.insertRow) return { scanned: texts.length, found: found.length, added, dbAdded: 0 };
       const dbRows = await readDb();
-      if (!dbRows) return;
+      if (!dbRows) return { scanned: texts.length, found: found.length, added, dbAdded: 0 };
       const dbNames = new Set(dbRows.map(r => r['NPC名称']));
+      let dbAdded = 0;
       for (const npc of found) {
         if (dbNames.has(npc.name)) continue;
         await api.insertRow(TABLE_NAME, { 'NPC名称': npc.name, '势力': npc.faction || '自动识别', '身份': npc.identity || '', '好感度': 0, '状态': 'offline', '心情': 'calm', '备注': '打开角色卡时自动识别' });
+        dbAdded++;
       }
       if (api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
+      return { scanned: texts.length, found: found.length, added, dbAdded };
     } finally {
       autoSyncing = false;
     }
@@ -355,7 +370,7 @@
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
     root.querySelector('[data-action="api"]')?.addEventListener('click', showApiDialog);
     root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
-    root.querySelector('[data-action="rescan"]')?.addEventListener('click', async () => { await syncAutoNpcs(true); await loadRows(); render(); });
+    root.querySelector('[data-action="rescan"]')?.addEventListener('click', handleRescan);
     root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
     root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; render(); }));
     root.querySelectorAll('.npcpv-card').forEach(card => card.addEventListener('click', () => { selectedId = card.dataset.id; render(); }));
@@ -367,6 +382,33 @@
     root.querySelector('[data-action="notes"]')?.addEventListener('input', e => { clearTimeout(timer); timer = setTimeout(() => writeField(selected, '备注', e.target.value), 500); });
     root.querySelector('[data-action="delete"]')?.addEventListener('click', () => { if (confirm('删除这个NPC？')) deleteNpc(selected); });
     root.querySelector('[data-action="avatar"]')?.addEventListener('click', () => uploadAvatar(selected));
+  }
+
+  async function handleRescan(e) {
+    const btn = e?.currentTarget;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '扫描中...';
+    }
+    try {
+      const result = await syncAutoNpcs(true);
+      await loadRows();
+      render();
+      const message = result?.found
+        ? `重扫完成：扫描文本 ${result.scanned} 段，识别 ${result.found} 个NPC，新增 ${result.added} 个${result.dbAdded ? `，数据库新增 ${result.dbAdded} 行` : ''}。`
+        : `重扫完成：扫描文本 ${result?.scanned || 0} 段，未识别到可自动建档的NPC。请确认角色卡资料或世界书里包含“NPC/角色/人物/姓名/身份/势力”等结构化描述。`;
+      showNotice(message);
+    } catch (err) {
+      console.error(err);
+      showNotice('重扫失败：扩展读取当前角色卡资料时出错，详情见浏览器控制台。');
+      render();
+    }
+  }
+
+  function showNotice(message) {
+    const root = document.getElementById(PANEL_ID);
+    if (!root) return alert(message);
+    showSubDialog(`<h3>扫描结果</h3><div class="npcpv-notice">${esc(message)}</div><div class="npcpv-dialog-actions"><button class="npcpv-btn primary" data-subclose="1">知道了</button></div>`);
   }
 
   function showSubDialog(html, after) {
