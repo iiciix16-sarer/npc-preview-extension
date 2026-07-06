@@ -9,7 +9,6 @@
   const AVATAR_PREFIX = 'npc_preview_avatars_';
   const API_PREFIX = 'npc_preview_api_';
   const SETTINGS_PREFIX = 'npc_preview_settings_';
-  const SCAN_PREFIX = 'npc_preview_scan_';
 
   const STATUSES = [
     ['offline', '离线', '#9e9e9e'],
@@ -32,7 +31,6 @@
   let filter = '全部';
   let query = '';
   let buttonDrag = null;
-  let autoSyncing = false;
 
   function ctxKey(prefix) {
     try {
@@ -62,8 +60,6 @@
   function saveApiConfig(value) { localStorage.setItem(ctxKey(API_PREFIX), JSON.stringify(value)); }
   function buttonSettings() { return parse(localStorage.getItem(ctxKey(SETTINGS_PREFIX)) || 'null', { x: null, y: null, color: '#43a047', text: 'NPC', size: 46 }) || { x: null, y: null, color: '#43a047', text: 'NPC', size: 46 }; }
   function saveButtonSettings(value) { localStorage.setItem(ctxKey(SETTINGS_PREFIX), JSON.stringify(value)); }
-  function scanState() { return parse(localStorage.getItem(ctxKey(SCAN_PREFIX)) || 'null', { signature: '' }) || { signature: '' }; }
-  function saveScanState(value) { localStorage.setItem(ctxKey(SCAN_PREFIX), JSON.stringify(value)); }
 
   function statusOf(value) { return STATUSES.find(x => x[0] === value) || STATUSES[0]; }
   function moodOf(value) { return MOODS.find(x => x[0] === value) || MOODS[0]; }
@@ -93,8 +89,9 @@
 
   function splitNames(value) {
     return String(value || '')
-      .split(/[、,，/|；;\n]/)
-      .map(v => v.replace(/(?:身份|势力|阵营|组织|职业|职位|职务|定位)\s*[:：].*$/g, '').trim())
+      .replace(/[\[\]【】]/g, '\n')
+      .split(/[、,，/|；;\n\r]+/)
+      .map(v => v.replace(/^\s*(?:[-*•]|\d+[.、])\s*/g, '').replace(/(?:身份|势力|阵营|组织|职业|职位|职务|定位)\s*[:：].*$/g, '').trim())
       .filter(Boolean);
   }
 
@@ -171,89 +168,62 @@
     return out;
   }
 
-  function entriesSignature(entries) {
-    const joined = JSON.stringify(entries.map(e => ({ source: e.source, keys: e.keys, comment: e.comment, content: e.content }))).slice(0, 200000);
-    let hash = 0;
-    for (let i = 0; i < joined.length; i++) hash = ((hash << 5) - hash + joined.charCodeAt(i)) | 0;
-    return `${joined.length}:${hash}`;
-  }
-
-  function variableValuePatterns(variable) {
-    const v = variable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return [
-      new RegExp(`\\{\\{setvar::${v}::([^}]+)\\}\\}`, 'gi'),
-      new RegExp(`\\{\\{setvar::${v}=([^}]+)\\}\\}`, 'gi'),
-      new RegExp(`/setvar\\s+(?:key=)?${v}\\s+(?:value=)?([^|\\n]+)`, 'gi'),
-      new RegExp(`/setvar\\s+${v}=([^|\\n]+)`, 'gi'),
-      new RegExp(`["']?${v}["']?\\s*[:=：]\\s*["']?([^"'，。；;\\n}]+)`, 'gi'),
-    ];
-  }
-
-  function extractVariableValues(text, variable) {
-    const values = [];
-    for (const re of variableValuePatterns(variable)) {
-      let match;
-      while ((match = re.exec(text))) values.push(match[1]);
-    }
-    return values;
-  }
-
-  async function readNpcNameVariableIfReferenced(entries) {
-    const mentions = entries.some(entry => /NPC名字/.test(`${entry.comment}\n${entry.keys.join('\n')}\n${entry.content}`));
-    if (!mentions) return [];
-    const value = await getVar('NPC名字', '');
-    return value ? splitNames(value) : [];
-  }
-
-  async function scanNpcCandidates(entries) {
+  function parseImportNames(text) {
     const map = new Map();
-    for (const entry of entries) {
-      const header = `${entry.comment}\n${entry.keys.join('\n')}`;
-      const body = entry.content;
-      const text = `${header}\n${body}`;
-      extractVariableValues(text, 'NPC名字').forEach(value => splitNames(value).forEach(name => addCandidate(map, name, text)));
+    const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    for (const line of lines) {
+      let matched = false;
+      const labeled = /(?:NPC名字|NPC名称|NPC姓名|名字|姓名|名称)\s*[:：=]\s*(.+)$/i.exec(line);
+      if (labeled) {
+        splitNames(labeled[1]).forEach(name => addCandidate(map, name, line));
+        matched = true;
+      }
+      if (!matched) splitNames(line).forEach(name => addCandidate(map, name, line));
     }
-    (await readNpcNameVariableIfReferenced(entries)).forEach(name => addCandidate(map, name, '变量：NPC名字'));
     return Array.from(map.values());
   }
 
-  async function syncAutoNpcs(force) {
-    if (autoSyncing) return { scanned: 0, found: 0, added: 0, dbAdded: 0, skipped: true };
-    autoSyncing = true;
-    try {
-      const entries = await scanWorldbookEntries();
-      const signature = entriesSignature(entries);
-      if (!force && signature && scanState().signature === signature) return { scanned: entries.length, found: 0, added: 0, dbAdded: 0, cached: true };
-      const found = await scanNpcCandidates(entries);
-      saveScanState({ signature });
-      if (!found.length) return { scanned: entries.length, found: 0, added: 0, dbAdded: 0 };
-      const byName = new Set(registry().map(n => n.name));
-      const next = registry();
-      let added = 0;
-      for (const npc of found) {
-        if (byName.has(npc.name)) continue;
-        next.push({ id: Date.now() + Math.random(), name: npc.name, faction: npc.faction || '自动识别', identity: npc.identity || '' });
-        byName.add(npc.name);
+  function enrichFromWorldbook(items, entries) {
+    return items.map(item => {
+      const hit = entries.find(entry => {
+        const text = `${entry.comment}\n${entry.keys.join('\n')}\n${entry.content}`;
+        return text.includes(item.name);
+      });
+      if (!hit) return item;
+      const text = `${hit.comment}\n${hit.keys.join('\n')}\n${hit.content}`;
+      return { ...item, faction: item.faction || inferFaction(text), identity: item.identity || inferIdentity(text) };
+    });
+  }
+
+  async function addNpcBatch(items) {
+    const existing = new Set(rows.map(r => r['NPC名称']).filter(Boolean));
+    let added = 0;
+    let skipped = 0;
+    if (mode === '数据库模式' && dbApi()?.insertRow) {
+      const api = dbApi();
+      for (const item of items) {
+        if (existing.has(item.name)) { skipped++; continue; }
+        const ok = await api.insertRow(TABLE_NAME, { 'NPC名称': item.name, '势力': item.faction || '', '身份': item.identity || '', '好感度': 0, '状态': 'offline', '心情': 'calm', '备注': '' });
+        if (ok) { existing.add(item.name); added++; }
+      }
+      if (added && api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
+    } else {
+      const reg = registry();
+      for (const item of items) {
+        if (existing.has(item.name) || reg.some(n => n.name === item.name)) { skipped++; continue; }
+        reg.push({ id: Date.now() + Math.random(), name: item.name, faction: item.faction || '', identity: item.identity || '' });
+        const key = keyName(item.name);
+        await setVar(VAR_PREFIX + key + '_好感', 0);
+        await setVar(VAR_PREFIX + key + '_状态', 'offline');
+        await setVar(VAR_PREFIX + key + '_心情', 'calm');
+        await setVar(VAR_PREFIX + key + '_备注', '');
         added++;
       }
-      saveRegistry(next);
-
-      const api = dbApi();
-      if (!api?.insertRow) return { scanned: entries.length, found: found.length, added, dbAdded: 0 };
-      const dbRows = await readDb();
-      if (!dbRows) return { scanned: entries.length, found: found.length, added, dbAdded: 0 };
-      const dbNames = new Set(dbRows.map(r => r['NPC名称']));
-      let dbAdded = 0;
-      for (const npc of found) {
-        if (dbNames.has(npc.name)) continue;
-        await api.insertRow(TABLE_NAME, { 'NPC名称': npc.name, '势力': npc.faction || '自动识别', '身份': npc.identity || '', '好感度': 0, '状态': 'offline', '心情': 'calm', '备注': '打开角色卡时自动识别' });
-        dbAdded++;
-      }
-      if (api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
-      return { scanned: entries.length, found: found.length, added, dbAdded };
-    } finally {
-      autoSyncing = false;
+      saveRegistry(reg);
     }
+    await loadRows();
+    render();
+    return { added, skipped };
   }
 
   async function getVar(key, fallback) {
@@ -321,7 +291,6 @@
   }
 
   async function loadRows() {
-    await syncAutoNpcs();
     const dbRows = await readDb();
     if (dbRows && dbRows.length) {
       mode = '数据库模式';
@@ -396,7 +365,6 @@
     selectedId = null;
     filter = '全部';
     query = '';
-    saveScanState({ signature: entriesSignature(await scanWorldbookEntries()) });
     rows = [];
     mode = dbApi()?.exportTableAsJson ? '数据库模式' : '变量模式';
     render();
@@ -433,7 +401,7 @@
     const selected = rows.find(r => String(r.id) === String(selectedId));
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const cards = filteredRows().map(r => cardHtml(r, selected && String(r.id) === String(selected.id))).join('');
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn" data-action="rescan">重扫世界书</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">按钮</button><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn primary" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cards || '<div class="npcpv-empty" style="grid-column:1/-1">未识别到NPC<br>可点「重扫世界书」或手动添加</div>'}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>打开角色卡后会自动扫描世界书</div>'}</div></div></div></div>`;
+    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">按钮</button><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cards || '<div class="npcpv-empty" style="grid-column:1/-1">暂无NPC<br>点击「批量导入」粘贴名单</div>'}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
     bindEvents(root);
   }
 
@@ -444,7 +412,7 @@
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
     root.querySelector('[data-action="api"]')?.addEventListener('click', showApiDialog);
     root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
-    root.querySelector('[data-action="rescan"]')?.addEventListener('click', handleRescan);
+    root.querySelector('[data-action="batch-import"]')?.addEventListener('click', showBatchImportDialog);
     root.querySelector('[data-action="clear-all"]')?.addEventListener('click', clearAllNpcs);
     root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
     root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; render(); }));
@@ -457,27 +425,6 @@
     root.querySelector('[data-action="notes"]')?.addEventListener('input', e => { clearTimeout(timer); timer = setTimeout(() => writeField(selected, '备注', e.target.value), 500); });
     root.querySelector('[data-action="delete"]')?.addEventListener('click', () => { if (confirm('删除这个NPC？')) deleteNpc(selected); });
     root.querySelector('[data-action="avatar"]')?.addEventListener('click', () => uploadAvatar(selected));
-  }
-
-  async function handleRescan(e) {
-    const btn = e?.currentTarget;
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = '扫描中...';
-    }
-    try {
-      const result = await syncAutoNpcs(true);
-      await loadRows();
-      render();
-      const message = result?.found
-        ? `重扫完成：读取世界书条目 ${result.scanned} 条，识别 ${result.found} 个NPC，新增 ${result.added} 个${result.dbAdded ? `，数据库新增 ${result.dbAdded} 行` : ''}。`
-        : `重扫完成：读取世界书条目 ${result?.scanned || 0} 条，未识别到NPC。请确认世界书里有对变量“NPC名字”的赋值，或当前聊天变量里已有“NPC名字”的值。`;
-      showNotice(message);
-    } catch (err) {
-      console.error(err);
-      showNotice('重扫失败：扩展读取世界书时出错，详情见浏览器控制台。');
-      render();
-    }
   }
 
   function showNotice(message) {
@@ -506,6 +453,38 @@
         if (!name) return;
         addNpc(name, document.getElementById('npc-add-faction').value.trim(), document.getElementById('npc-add-identity').value.trim());
         closeSubDialog();
+      };
+    });
+  }
+
+  function previewImportHtml(items) {
+    if (!items.length) return '<div class="npcpv-empty compact">未解析到可导入的NPC名字</div>';
+    return items.map(item => `<div class="npcpv-import-row"><b>${esc(item.name)}</b><span>${esc(item.faction || '未识别势力')}</span><span>${esc(item.identity || '未识别身份')}</span></div>`).join('');
+  }
+
+  function showBatchImportDialog() {
+    showSubDialog(`<h3>批量导入NPC</h3><div class="npcpv-form"><textarea class="npcpv-textarea npcpv-import-input" id="npc-import-text" placeholder="从世界书复制NPC名字文本，或手动输入。支持一行一个、顿号/逗号分隔，也支持：NPC名字：张三、李四"></textarea><div class="npcpv-small">导入时会按名字匹配当前世界书条目，能识别到“势力/阵营/组织/所属”和“身份/职业/职位/职务/定位”时会自动带入。</div><div class="npcpv-import-preview" id="npc-import-preview"></div></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-import-ok">全部添加</button></div>`, () => {
+      const input = document.getElementById('npc-import-text');
+      const preview = document.getElementById('npc-import-preview');
+      let parsed = [];
+      let timer;
+      const update = () => {
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+          const base = parseImportNames(input.value);
+          parsed = enrichFromWorldbook(base, await scanWorldbookEntries());
+          preview.innerHTML = previewImportHtml(parsed);
+        }, 120);
+      };
+      input.addEventListener('input', update);
+      preview.innerHTML = previewImportHtml([]);
+      document.getElementById('npc-import-ok').onclick = async () => {
+        const base = parseImportNames(input.value);
+        const items = enrichFromWorldbook(base, await scanWorldbookEntries());
+        if (!items.length) return;
+        const result = await addNpcBatch(items);
+        closeSubDialog();
+        showNotice(`批量导入完成：新增 ${result.added} 个，跳过重复 ${result.skipped} 个。`);
       };
     });
   }
@@ -639,8 +618,6 @@
 
   window.NPCPreviewOpen = openPanel;
   ensureButton();
-  syncAutoNpcs().catch(console.error);
   setTimeout(ensureButton, 2000);
   setTimeout(ensureButton, 6000);
-  setTimeout(() => syncAutoNpcs().catch(console.error), 3000);
 })();

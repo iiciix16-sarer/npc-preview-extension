@@ -217,6 +217,7 @@
 .npcpv-textarea:focus,
 .npcpv-input:focus { border-color: #43a047; background: #fff; }
 .npcpv-textarea { min-height: 86px; resize: vertical; }
+.npcpv-import-input { min-height: 140px; }
 .npcpv-form { display: grid; gap: 10px; }
 .npcpv-modal-sub { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0,0,0,.25); }
 .npcpv-dialog { width: min(420px, 100%); border: 1px solid #dcebdc; border-radius: 12px; padding: 16px; background: #fff; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
@@ -224,6 +225,11 @@
 .npcpv-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .npcpv-notice { color: #233323; font-size: 13px; line-height: 1.7; }
 .npcpv-btn:disabled { opacity: .55; cursor: wait; }
+.npcpv-import-preview { max-height: 190px; overflow: auto; display: grid; gap: 6px; }
+.npcpv-import-row { display: grid; grid-template-columns: minmax(72px, 1fr) minmax(72px, 1fr) minmax(72px, 1fr); gap: 6px; align-items: center; border: 1px solid #e5efe5; border-radius: 7px; padding: 6px 8px; background: #fbfdfb; color: #5f735f; font-size: 12px; }
+.npcpv-import-row b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #2e7d32; }
+.npcpv-import-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.npcpv-empty.compact { min-height: 64px; height: auto; }
 
 @media (max-width: 640px) {
   .npcpv-mask { align-items: stretch; padding: 0; }
