@@ -10,6 +10,7 @@
   const API_PREFIX = 'npc_preview_api_';
   const SETTINGS_PREFIX = 'npc_preview_settings_';
   const EXTRA_PREFIX = 'npc_preview_extra_';
+  const REQUIRED_COLUMNS = ['NPC名称', '势力', '身份', '好感度', '状态', '心情', '备注', '首次登场', '登场事件', 'NPC关系', '好感历史'];
 
   const STATUSES = [
     ['offline', '离线', '#9e9e9e'],
@@ -32,6 +33,8 @@
   let filter = '全部';
   let query = '';
   let buttonDrag = null;
+  let dbMissingColumns = [];
+  let liveUpdateBound = false;
 
   function ctxKey(prefix) {
     try {
@@ -100,10 +103,53 @@
     return extras()[name] || { firstSeen: '', firstEvent: '', relations: '', history: [] };
   }
 
+  function rowExtra(row) {
+    const ex = extraFor(row['NPC名称']);
+    return {
+      ...ex,
+      firstSeen: row['首次登场'] || ex.firstSeen || '',
+      firstEvent: row['登场事件'] || ex.firstEvent || '',
+      relations: row['NPC关系'] || row['关系'] || ex.relations || '',
+      history: parseHistory(row['好感历史']) || ex.history || [],
+    };
+  }
+
   function saveExtraFor(name, patch) {
     const all = extras();
     all[name] = { ...(all[name] || {}), ...patch };
     saveExtras(all);
+  }
+
+  function parseHistory(value) {
+    if (Array.isArray(value)) return value;
+    if (!value) return null;
+    const parsed = parse(String(value), null);
+    if (Array.isArray(parsed)) return parsed;
+    const list = String(value).split(/[;；\n]/).map(x => x.trim()).filter(Boolean).map(x => {
+      const m = x.match(/(-?\d+)/);
+      return m ? { time: '', value: Number(m[1]) || 0 } : null;
+    }).filter(Boolean);
+    return list.length ? list : null;
+  }
+
+  function serializeHistory(history) {
+    return JSON.stringify((Array.isArray(history) ? history : []).slice(-80));
+  }
+
+  function dbRowPayload(data) {
+    return {
+      'NPC名称': data.name || data['NPC名称'] || '',
+      '势力': data.faction ?? data['势力'] ?? '',
+      '身份': data.identity ?? data['身份'] ?? '',
+      '好感度': data['好感度'] ?? 0,
+      '状态': data['状态'] || 'offline',
+      '心情': data['心情'] || 'calm',
+      '备注': data['备注'] || '',
+      '首次登场': data.firstSeen ?? data['首次登场'] ?? '',
+      '登场事件': data.firstEvent ?? data['登场事件'] ?? '',
+      'NPC关系': data.relations ?? data['NPC关系'] ?? '',
+      '好感历史': data.history ? serializeHistory(data.history) : (data['好感历史'] || '[]'),
+    };
   }
 
   function splitNames(value) {
@@ -220,10 +266,11 @@
     let skipped = 0;
     if (mode === '数据库模式' && dbApi()?.insertRow) {
       const api = dbApi();
+      if (dbMissingColumns.length) showNotice('NPC预览表缺少列：' + dbMissingColumns.join('、') + '。这些字段需要补到数据库表里，AI 才能实时维护。');
       for (const item of items) {
         if (existing.has(item.name)) { skipped++; continue; }
-        const ok = await api.insertRow(TABLE_NAME, { 'NPC名称': item.name, '势力': item.faction || '', '身份': item.identity || '', '好感度': 0, '状态': 'offline', '心情': 'calm', '备注': '' });
-        if (ok) { existing.add(item.name); added++; }
+        const ok = await api.insertRow(TABLE_NAME, dbRowPayload(item));
+        if (ok && ok !== -1) { existing.add(item.name); added++; }
         if ((added + skipped) % 20 === 0) await sleep(0);
       }
       if (added && api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
@@ -245,7 +292,7 @@
   }
 
   function exportPayload() {
-    return { version: '1.0', exportedAt: new Date().toISOString(), registry: registry(), extras: extras(), avatars: avatars(), settings: buttonSettings() };
+    return { version: '1.0', exportedAt: new Date().toISOString(), requiredColumns: REQUIRED_COLUMNS, registry: registry(), extras: extras(), avatars: avatars(), settings: buttonSettings() };
   }
 
   async function importPayload(payload) {
@@ -279,7 +326,7 @@
 
   function relationGraphHtml(selected) {
     const names = rows.map(r => r['NPC名称']).filter(Boolean);
-    const ex = extraFor(selected['NPC名称']);
+    const ex = rowExtra(selected);
     const links = String(ex.relations || '').split(/[、,，;；\n]/).map(x => x.trim()).filter(Boolean);
     const nodes = [selected['NPC名称'], ...links.filter(x => names.includes(x))].slice(0, 9);
     if (nodes.length <= 1) return '<div class="npcpv-empty compact">暂无关系。可在“关系”里输入其他NPC名字，使用顿号或换行分隔。</div>';
@@ -330,6 +377,17 @@
 
   function dbApi() { return window.AutoCardUpdaterAPI || null; }
 
+  function bindLiveUpdates() {
+    const api = dbApi();
+    if (liveUpdateBound || !api?.registerTableUpdateCallback) return;
+    liveUpdateBound = true;
+    api.registerTableUpdateCallback(async () => {
+      if (!document.getElementById(PANEL_ID)) return;
+      await loadRows();
+      render();
+    });
+  }
+
   async function readDb() {
     const api = dbApi();
     if (!api?.exportTableAsJson) return null;
@@ -340,13 +398,14 @@
       if (!table?.content || !Array.isArray(table.content) || table.content.length < 2) return null;
       const headers = table.content[0];
       if (!headers.includes('NPC名称') || !headers.includes('好感度')) return null;
+      dbMissingColumns = REQUIRED_COLUMNS.filter(col => !headers.includes(col));
       return table.content.slice(1).map((row, index) => {
         const item = { id: 'db_' + (index + 1), rowIndex: index + 1, source: 'db' };
         headers.forEach((h, i) => { item[h] = row[i] == null ? '' : row[i]; });
-        Object.assign(item, extraFor(item['NPC名称']));
+        Object.assign(item, rowExtra(item));
         return item;
       });
-    } catch (_) { return null; }
+    } catch (_) { dbMissingColumns = []; return null; }
   }
 
   async function readVars() {
@@ -386,7 +445,8 @@
     if (row.source === 'db') {
       const api = dbApi();
       if (api?.updateRow) {
-        const ok = await api.updateRow(TABLE_NAME, row.rowIndex, { [field]: value });
+        const mapped = field === '关系' ? 'NPC关系' : field;
+        const ok = await api.updateRow(TABLE_NAME, row.rowIndex, { [mapped]: value });
         if (ok && api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
       }
     } else {
@@ -404,9 +464,10 @@
       if (field === '备注') await setVar(VAR_PREFIX + key + '_备注', value);
     }
     if (field === '好感度') {
-      const ex = extraFor(row['NPC名称']);
+      const ex = rowExtra(row);
       const history = Array.isArray(ex.history) ? ex.history : [];
       history.push({ time: new Date().toISOString(), value: Number(value) || 0 });
+      if (row.source === 'db' && dbApi()?.updateRow) await dbApi().updateRow(TABLE_NAME, row.rowIndex, { '好感历史': serializeHistory(history) });
       saveExtraFor(row['NPC名称'], { history: history.slice(-80) });
     }
     if (field === '首次登场') saveExtraFor(row['NPC名称'], { firstSeen: value });
@@ -418,7 +479,7 @@
 
   async function addNpc(name, faction, identity) {
     if (mode === '数据库模式' && dbApi()?.insertRow) {
-      const ok = await dbApi().insertRow(TABLE_NAME, { 'NPC名称': name, '势力': faction, '身份': identity, '好感度': 0, '状态': 'offline', '心情': 'calm', '备注': '' });
+      const ok = await dbApi().insertRow(TABLE_NAME, dbRowPayload({ name, faction, identity }));
       if (ok && dbApi().refreshDataAndWorldbook) await dbApi().refreshDataAndWorldbook();
     } else {
       const reg = registry();
@@ -502,7 +563,7 @@
     const aff = Number(row['好感度']) || 0;
     const mood = moodOf(row['心情']);
     const avatar = avatars()[name];
-    const ex = extraFor(name);
+    const ex = rowExtra(row);
     return `<div class="npcpv-profile"><div class="npcpv-big-avatar" data-action="avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}<span>上传头像</span></div><div class="npcpv-profile-text"><div class="npcpv-main-name">${esc(name)}</div><div class="npcpv-main-sub">${esc(row['势力'] || '未分组')}</div><div class="npcpv-main-sub long">${esc(row['身份'] || '')}</div></div></div><div class="npcpv-section"><div class="npcpv-label">分组 / 势力</div><input class="npcpv-input" data-action="faction" value="${esc(row['势力'] || '')}" placeholder="例如：星耀传媒、黑市、王城"></div><div class="npcpv-section"><div class="npcpv-label">身份介绍</div><textarea class="npcpv-textarea npcpv-identity" data-action="identity" placeholder="例如：星耀传媒旗下影帝 / 体验派演员 / 曾获金...">${esc(row['身份'] || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">首次登场时间 / 章节</div><input class="npcpv-input" data-action="first-seen" value="${esc(ex.firstSeen || '')}" placeholder="例如：第3章 / 初见舞台 / 2026-07-06"></div><div class="npcpv-section"><div class="npcpv-label">首次登场发生了什么</div><textarea class="npcpv-textarea" data-action="first-event" placeholder="记录第一次出现的位置和事件，方便回溯">${esc(ex.firstEvent || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">好感度 <span class="npcpv-small">${mode === '数据库模式' ? '数据库列：好感度' : '变量：' + VAR_PREFIX + keyName(name) + '_好感'}</span></div><div class="npcpv-aff"><div class="npcpv-affbar"><div class="npcpv-afffill" style="width:${Math.min(Math.abs(aff),100)}%;background:${affectionColor(aff)}"></div></div><div class="npcpv-affval" style="color:${affectionColor(aff)}">${aff}</div></div>${trendSvg(ex.history, aff)}<div class="npcpv-ctrls">${[-10,-5,-1,1,5,10].map(n => `<button class="npcpv-btn" data-action="aff" data-delta="${n}">${n > 0 ? '+' : ''}${n}</button>`).join('')}</div></div><div class="npcpv-section"><div class="npcpv-label">NPC关系</div><textarea class="npcpv-textarea" data-action="relations" placeholder="输入相关 NPC 名字，用顿号、逗号或换行分隔">${esc(ex.relations || '')}</textarea>${relationGraphHtml(row)}</div><div class="npcpv-section"><div class="npcpv-label">状态</div><select class="npcpv-select" data-action="status">${STATUSES.map(s => `<option value="${s[0]}" ${s[0] === (row['状态'] || 'offline') ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">心情 <span class="npcpv-small">${mood[2]}</span></div><select class="npcpv-select" data-action="mood">${MOODS.map(m => `<option value="${m[0]}" ${m[0] === (row['心情'] || 'calm') ? 'selected' : ''}>${m[2]} ${m[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">备注</div><textarea class="npcpv-textarea" data-action="notes">${esc(row['备注'] || '')}</textarea></div><div class="npcpv-ctrls"><button class="npcpv-btn danger" data-action="delete">删除NPC</button></div>`;
   }
 
@@ -511,7 +572,8 @@
     if (!root) return;
     const selected = rows.find(r => String(r.id) === String(selectedId));
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    const warn = mode === '数据库模式' && dbMissingColumns.length ? `<div class="npcpv-db-warn">数据库缺列：${esc(dbMissingColumns.join('、'))}。请补齐后 AI 才能实时维护这些字段。</div>` : '';
+    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
     applyPanelTheme(root);
     bindEvents(root);
   }
@@ -630,7 +692,7 @@
   }
 
   function showDataDialog() {
-    showSubDialog(`<h3>数据导入/导出</h3><div class="npcpv-form"><textarea class="npcpv-textarea npcpv-import-input" id="npc-data-json" placeholder="这里会显示导出的 JSON，也可以粘贴备份 JSON 后导入"></textarea><div class="npcpv-small">导出包含本地 NPC 目录、扩展元数据、头像和 UI 设置。数据库表内容如需完整备份，请优先使用神数据库自身导出。</div></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" id="npc-data-fill">生成导出JSON</button><button class="npcpv-btn" id="npc-data-download">下载</button><button class="npcpv-btn primary" id="npc-data-import">导入</button><button class="npcpv-btn" data-subclose="1">关闭</button></div>`, () => {
+    showSubDialog(`<h3>数据导入/导出</h3><div class="npcpv-form"><textarea class="npcpv-textarea npcpv-import-input" id="npc-data-json" placeholder="这里会显示导出的 JSON，也可以粘贴备份 JSON 后导入"></textarea><div class="npcpv-small">AI 实时维护需要 NPC预览表 包含这些列：${esc(REQUIRED_COLUMNS.join('、'))}。导出包含本地扩展数据和 UI 设置；数据库表内容请优先用神数据库自身导出。</div></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" id="npc-data-fill">生成导出JSON</button><button class="npcpv-btn" id="npc-data-download">下载</button><button class="npcpv-btn primary" id="npc-data-import">导入</button><button class="npcpv-btn" data-subclose="1">关闭</button></div>`, () => {
       const area = document.getElementById('npc-data-json');
       document.getElementById('npc-data-fill').onclick = () => { area.value = JSON.stringify(exportPayload(), null, 2); };
       document.getElementById('npc-data-download').onclick = () => downloadJson('npc-preview-backup.json', exportPayload());
@@ -701,6 +763,7 @@
   }
 
   async function openPanel() {
+    bindLiveUpdates();
     await loadRows();
     let root = document.getElementById(PANEL_ID);
     if (!root) {
@@ -788,6 +851,8 @@
 
   window.NPCPreviewOpen = openPanel;
   ensureButton();
+  bindLiveUpdates();
   setTimeout(ensureButton, 2000);
   setTimeout(ensureButton, 6000);
+  setTimeout(bindLiveUpdates, 3000);
 })();
