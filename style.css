@@ -3,17 +3,27 @@
   right: 18px;
   bottom: 86px;
   z-index: 29999;
+  width: 46px;
+  height: 46px;
   border: 0;
-  border-radius: 999px;
-  padding: 10px 14px;
+  border-radius: 50%;
+  padding: 0;
   background: #43a047;
   color: #fff;
-  font: 700 13px/1 "PingFang SC", "Microsoft YaHei", sans-serif;
+  font: 800 12px/1 "PingFang SC", "Microsoft YaHei", sans-serif;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.24);
-  cursor: pointer;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  letter-spacing: .2px;
 }
 
-.npcpv-open-button:hover { background: #2e7d32; }
+.npcpv-open-button:hover { filter: brightness(.92); }
+.npcpv-open-button:active { cursor: grabbing; transform: scale(.98); }
 
 .npcpv-mask {
   position: fixed;
@@ -194,6 +204,7 @@
 .npcpv-select,
 .npcpv-textarea,
 .npcpv-input { width: 100%; border: 1px solid #dcebdc; border-radius: 8px; padding: 8px 10px; background: #fbfdfb; color: #233323; outline: none; font-family: inherit; }
+.npcpv-range { width: 100%; accent-color: #43a047; }
 .npcpv-select:focus,
 .npcpv-textarea:focus,
 .npcpv-input:focus { border-color: #43a047; background: #fff; }

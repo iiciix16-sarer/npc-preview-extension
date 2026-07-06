@@ -8,6 +8,8 @@
   const REG_PREFIX = 'npc_preview_registry_';
   const AVATAR_PREFIX = 'npc_preview_avatars_';
   const API_PREFIX = 'npc_preview_api_';
+  const SETTINGS_PREFIX = 'npc_preview_settings_';
+  const SCAN_PREFIX = 'npc_preview_scan_';
 
   const STATUSES = [
     ['offline', '离线', '#9e9e9e'],
@@ -29,6 +31,8 @@
   let mode = '变量模式';
   let filter = '全部';
   let query = '';
+  let buttonDrag = null;
+  let autoSyncing = false;
 
   function ctxKey(prefix) {
     try {
@@ -56,6 +60,10 @@
   function saveAvatars(value) { localStorage.setItem(ctxKey(AVATAR_PREFIX), JSON.stringify(value)); }
   function apiConfig() { return parse(localStorage.getItem(ctxKey(API_PREFIX)) || 'null', { baseUrl: '', apiKey: '', model: '' }) || { baseUrl: '', apiKey: '', model: '' }; }
   function saveApiConfig(value) { localStorage.setItem(ctxKey(API_PREFIX), JSON.stringify(value)); }
+  function buttonSettings() { return parse(localStorage.getItem(ctxKey(SETTINGS_PREFIX)) || 'null', { x: null, y: null, color: '#43a047', text: 'NPC', size: 46 }) || { x: null, y: null, color: '#43a047', text: 'NPC', size: 46 }; }
+  function saveButtonSettings(value) { localStorage.setItem(ctxKey(SETTINGS_PREFIX), JSON.stringify(value)); }
+  function scanState() { return parse(localStorage.getItem(ctxKey(SCAN_PREFIX)) || 'null', { signature: '' }) || { signature: '' }; }
+  function saveScanState(value) { localStorage.setItem(ctxKey(SCAN_PREFIX), JSON.stringify(value)); }
 
   function statusOf(value) { return STATUSES.find(x => x[0] === value) || STATUSES[0]; }
   function moodOf(value) { return MOODS.find(x => x[0] === value) || MOODS[0]; }
@@ -67,6 +75,117 @@
     if (n >= 20) return '#81c784';
     if (n > 0) return '#c8e6c9';
     return '#bdbdbd';
+  }
+
+  function normalizeName(value) {
+    return String(value || '').replace(/[《》【】\[\]「」『』“”"'`]/g, '').replace(/\s+/g, '').trim();
+  }
+
+  function inferFaction(text) {
+    const m = String(text || '').match(/(?:势力|阵营|组织|所属)\s*[:：]\s*([^，。；;\n]{1,16})/);
+    return m ? m[1].trim() : '';
+  }
+
+  function inferIdentity(text) {
+    const m = String(text || '').match(/(?:身份|职位|职业|职务|定位)\s*[:：]\s*([^，。；;\n]{1,20})/);
+    return m ? m[1].trim() : '';
+  }
+
+  function addCandidate(map, name, sourceText) {
+    const clean = normalizeName(name);
+    if (!clean || clean.length < 2 || clean.length > 18) return;
+    if (/^(用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|身份|势力)$/.test(clean)) return;
+    if (!/[\u4e00-\u9fffA-Za-z]/.test(clean)) return;
+    if (!map.has(clean)) map.set(clean, { name: clean, faction: inferFaction(sourceText), identity: inferIdentity(sourceText) });
+    const item = map.get(clean);
+    item.faction = item.faction || inferFaction(sourceText);
+    item.identity = item.identity || inferIdentity(sourceText);
+  }
+
+  function collectText(value, out) {
+    if (value == null) return;
+    if (typeof value === 'string') {
+      out.push(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(v => collectText(v, out));
+      return;
+    }
+    if (typeof value === 'object') {
+      Object.keys(value).forEach(k => {
+        if (/^(content|comment|name|description|personality|scenario|first_mes|mes_example|creator_notes|system_prompt|post_history_instructions|entries|character_book|extensions)$/i.test(k)) collectText(value[k], out);
+      });
+    }
+  }
+
+  function scanSourceTexts() {
+    const texts = [];
+    try {
+      const ctx = window.SillyTavern?.getContext?.();
+      const ch = ctx?.characters?.[ctx.characterId] || ctx?.character || null;
+      collectText(ch, texts);
+    } catch (_) {}
+    return texts;
+  }
+
+  function textSignature(texts) {
+    const joined = texts.join('\n').slice(0, 200000);
+    let hash = 0;
+    for (let i = 0; i < joined.length; i++) hash = ((hash << 5) - hash + joined.charCodeAt(i)) | 0;
+    return `${joined.length}:${hash}`;
+  }
+
+  function scanNpcCandidates(texts) {
+    const map = new Map();
+    for (const text of texts) {
+      const lines = String(text).split(/\r?\n/).filter(Boolean);
+      for (const line of lines) {
+        if (!/(NPC|npc|角色|人物|姓名|名称|配角|同伴|敌人|势力|身份)/.test(line)) continue;
+        let m;
+        const direct = /(?:NPC|角色|人物|姓名|名称)\s*[:：]\s*([^，。；;、\n]{2,18})/g;
+        while ((m = direct.exec(line))) addCandidate(map, m[1], line);
+        const bracket = /[【\[]([^【】\[\]\n]{2,18})[】\]]/g;
+        while ((m = bracket.exec(line))) addCandidate(map, m[1], line);
+        const list = /^\s*(?:[-*•]|\d+[.、])\s*([^：:，。；;\n]{2,18})\s*[:：]/.exec(line);
+        if (list) addCandidate(map, list[1], line);
+      }
+    }
+    return Array.from(map.values());
+  }
+
+  async function syncAutoNpcs(force) {
+    if (autoSyncing) return;
+    autoSyncing = true;
+    try {
+      const texts = scanSourceTexts();
+      const signature = textSignature(texts);
+      if (!force && signature && scanState().signature === signature) return;
+      const found = scanNpcCandidates(texts);
+      saveScanState({ signature });
+      if (!found.length) return;
+      const byName = new Set(registry().map(n => n.name));
+      const next = registry();
+      for (const npc of found) {
+        if (byName.has(npc.name)) continue;
+        next.push({ id: Date.now() + Math.random(), name: npc.name, faction: npc.faction || '自动识别', identity: npc.identity || '' });
+        byName.add(npc.name);
+      }
+      saveRegistry(next);
+
+      const api = dbApi();
+      if (!api?.insertRow) return;
+      const dbRows = await readDb();
+      if (!dbRows) return;
+      const dbNames = new Set(dbRows.map(r => r['NPC名称']));
+      for (const npc of found) {
+        if (dbNames.has(npc.name)) continue;
+        await api.insertRow(TABLE_NAME, { 'NPC名称': npc.name, '势力': npc.faction || '自动识别', '身份': npc.identity || '', '好感度': 0, '状态': 'offline', '心情': 'calm', '备注': '打开角色卡时自动识别' });
+      }
+      if (api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
+    } finally {
+      autoSyncing = false;
+    }
   }
 
   async function getVar(key, fallback) {
@@ -134,6 +253,7 @@
   }
 
   async function loadRows() {
+    await syncAutoNpcs();
     const dbRows = await readDb();
     if (dbRows && dbRows.length) {
       mode = '数据库模式';
@@ -224,7 +344,7 @@
     const selected = rows.find(r => String(r.id) === String(selectedId));
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const cards = filteredRows().map(r => cardHtml(r, selected && String(r.id) === String(selected.id))).join('');
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn primary" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cards || '<div class="npcpv-empty" style="grid-column:1/-1">暂无NPC<br>点击「+ 新NPC」添加</div>'}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或点击「+ 新NPC」创建角色记录</div>'}</div></div></div></div>`;
+    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn" data-action="rescan">重扫角色卡</button><button class="npcpv-btn" data-action="button-settings">按钮</button><button class="npcpv-btn" data-action="api">API</button><button class="npcpv-btn primary" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cards || '<div class="npcpv-empty" style="grid-column:1/-1">未识别到NPC<br>可点「重扫角色卡」或手动添加</div>'}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>打开角色卡后会自动扫描目录</div>'}</div></div></div></div>`;
     bindEvents(root);
   }
 
@@ -234,6 +354,8 @@
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
     root.querySelector('[data-action="api"]')?.addEventListener('click', showApiDialog);
+    root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
+    root.querySelector('[data-action="rescan"]')?.addEventListener('click', async () => { await syncAutoNpcs(true); await loadRows(); render(); });
     root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
     root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; render(); }));
     root.querySelectorAll('.npcpv-card').forEach(card => card.addEventListener('click', () => { selectedId = card.dataset.id; render(); }));
@@ -276,6 +398,20 @@
     showSubDialog(`<h3>API配置</h3><div class="npcpv-form"><input class="npcpv-input" id="npc-api-url" placeholder="Base URL，例如 https://api.openai.com/v1" value="${esc(cfg.baseUrl)}"><input class="npcpv-input" id="npc-api-key" type="password" placeholder="API Key" value="${esc(cfg.apiKey)}"><input class="npcpv-input" id="npc-api-model" placeholder="Model，例如 gpt-4o-mini" value="${esc(cfg.model)}"></div><div class="npcpv-small" style="margin-top:8px">配置只保存在本地浏览器。</div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-api-ok">保存</button></div>`, () => {
       document.getElementById('npc-api-ok').onclick = () => {
         saveApiConfig({ baseUrl: document.getElementById('npc-api-url').value.trim(), apiKey: document.getElementById('npc-api-key').value.trim(), model: document.getElementById('npc-api-model').value.trim() });
+        closeSubDialog();
+      };
+    });
+  }
+
+  function showButtonDialog() {
+    const cfg = buttonSettings();
+    showSubDialog(`<h3>悬浮按钮设置</h3><div class="npcpv-form"><input class="npcpv-input" id="npc-btn-text" placeholder="按钮文字或图标" value="${esc(cfg.text)}"><input class="npcpv-input" id="npc-btn-color" type="color" value="${esc(cfg.color)}"><label class="npcpv-small">按钮尺寸：<span id="npc-btn-size-val">${Number(cfg.size) || 46}</span>px</label><input class="npcpv-range" id="npc-btn-size" type="range" min="34" max="86" value="${Number(cfg.size) || 46}"></div><div class="npcpv-small" style="margin-top:8px">也可以直接拖动页面右下角按钮改变位置。</div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-btn-ok">保存</button></div>`, () => {
+      const size = document.getElementById('npc-btn-size');
+      const sizeVal = document.getElementById('npc-btn-size-val');
+      size.oninput = () => { sizeVal.textContent = size.value; };
+      document.getElementById('npc-btn-ok').onclick = () => {
+        saveButtonSettings({ ...buttonSettings(), text: document.getElementById('npc-btn-text').value.trim() || 'NPC', color: document.getElementById('npc-btn-color').value, size: Number(size.value) || 46 });
+        applyButtonSettings();
         closeSubDialog();
       };
     });
@@ -328,13 +464,66 @@
     const btn = document.createElement('button');
     btn.id = BUTTON_ID;
     btn.className = 'npcpv-open-button';
-    btn.textContent = 'NPC预览表';
-    btn.onclick = openPanel;
+    btn.title = 'NPC预览表：点击打开，拖动移动位置';
+    btn.addEventListener('pointerdown', startButtonDrag);
+    btn.addEventListener('click', e => { if (!buttonDrag?.moved) openPanel(e); });
     document.body.appendChild(btn);
+    applyButtonSettings();
+  }
+
+  function applyButtonSettings() {
+    const btn = document.getElementById(BUTTON_ID);
+    if (!btn) return;
+    const cfg = buttonSettings();
+    const size = Math.max(34, Math.min(86, Number(cfg.size) || 46));
+    btn.textContent = cfg.text || 'NPC';
+    btn.style.background = cfg.color || '#43a047';
+    btn.style.width = size + 'px';
+    btn.style.height = size + 'px';
+    btn.style.fontSize = Math.max(11, Math.round(size / 3.8)) + 'px';
+    if (cfg.x != null && cfg.y != null) {
+      btn.style.left = Math.max(4, Math.min(window.innerWidth - size - 4, cfg.x)) + 'px';
+      btn.style.top = Math.max(4, Math.min(window.innerHeight - size - 4, cfg.y)) + 'px';
+      btn.style.right = 'auto';
+      btn.style.bottom = 'auto';
+    }
+  }
+
+  function startButtonDrag(e) {
+    const btn = e.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    buttonDrag = { startX: e.clientX, startY: e.clientY, left: rect.left, top: rect.top, moved: false };
+    btn.setPointerCapture?.(e.pointerId);
+    const move = ev => {
+      if (!buttonDrag) return;
+      const dx = ev.clientX - buttonDrag.startX;
+      const dy = ev.clientY - buttonDrag.startY;
+      if (Math.abs(dx) + Math.abs(dy) > 4) buttonDrag.moved = true;
+      const size = btn.offsetWidth;
+      const x = Math.max(4, Math.min(window.innerWidth - size - 4, buttonDrag.left + dx));
+      const y = Math.max(4, Math.min(window.innerHeight - size - 4, buttonDrag.top + dy));
+      btn.style.left = x + 'px';
+      btn.style.top = y + 'px';
+      btn.style.right = 'auto';
+      btn.style.bottom = 'auto';
+    };
+    const up = () => {
+      if (buttonDrag?.moved) {
+        const cfg = buttonSettings();
+        saveButtonSettings({ ...cfg, x: parseFloat(btn.style.left), y: parseFloat(btn.style.top) });
+      }
+      setTimeout(() => { buttonDrag = null; }, 0);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
   window.NPCPreviewOpen = openPanel;
   ensureButton();
+  syncAutoNpcs().catch(console.error);
   setTimeout(ensureButton, 2000);
   setTimeout(ensureButton, 6000);
+  setTimeout(() => syncAutoNpcs().catch(console.error), 3000);
 })();
