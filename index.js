@@ -35,6 +35,7 @@
   let dbMissingColumns = [];
   let liveUpdateBound = false;
   let settingsEntryBound = false;
+  let buttonObserver = null;
 
   function ctxKey(prefix) {
     try {
@@ -936,17 +937,45 @@
     applyButtonSettings();
   }
 
+  function keepButtonVisible() {
+    const btn = document.getElementById(BUTTON_ID);
+    if (!btn) return;
+    const size = btn.offsetWidth || 46;
+    const vv = window.visualViewport;
+    const width = vv?.width || window.innerWidth;
+    const height = vv?.height || window.innerHeight;
+    const left = btn.style.left ? parseFloat(btn.style.left) : (width - size - 18);
+    const top = btn.style.top ? parseFloat(btn.style.top) : (height - size - 86);
+    const x = Math.max(8, Math.min(width - size - 8, left));
+    const y = Math.max(8, Math.min(height - size - 8, top));
+    btn.style.left = x + 'px';
+    btn.style.top = y + 'px';
+    btn.style.right = 'auto';
+    btn.style.bottom = 'auto';
+  }
+
+  function observeButton() {
+    if (buttonObserver || !document.body) return;
+    buttonObserver = new MutationObserver(() => {
+      if (!document.getElementById(BUTTON_ID)) ensureButton();
+    });
+    buttonObserver.observe(document.body, { childList: true });
+  }
+
   function boot() {
     ensureButton();
+    keepButtonVisible();
     bindSettingsEntry();
     bindLiveUpdates();
+    observeButton();
   }
 
   function applyButtonSettings() {
     const btn = document.getElementById(BUTTON_ID);
     if (!btn) return;
     const cfg = buttonSettings();
-    const size = Math.max(34, Math.min(86, Number(cfg.size) || 46));
+    const minSize = window.matchMedia?.('(max-width: 640px)').matches ? 54 : 34;
+    const size = Math.max(minSize, Math.min(86, Number(cfg.size) || 46));
     btn.textContent = cfg.text || 'NPC';
     btn.style.background = cfg.color || '#43a047';
     btn.style.width = size + 'px';
@@ -958,6 +987,7 @@
       btn.style.right = 'auto';
       btn.style.bottom = 'auto';
     }
+    keepButtonVisible();
   }
 
   function applyPanelTheme(root) {
@@ -1006,6 +1036,9 @@
   window.NPCPreviewOpen = openPanel;
   boot();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+  window.addEventListener('resize', keepButtonVisible);
+  window.visualViewport?.addEventListener('resize', keepButtonVisible);
+  window.visualViewport?.addEventListener('scroll', keepButtonVisible);
   setTimeout(boot, 500);
   setTimeout(boot, 2000);
   setTimeout(boot, 6000);

@@ -1,8 +1,8 @@
 .npcpv-open-button {
   position: fixed;
-  right: 18px;
-  bottom: 86px;
-  z-index: 29999;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  z-index: 2147483646;
   width: 46px;
   height: 46px;
   border: 0;
@@ -20,6 +20,7 @@
   justify-content: center;
   text-align: center;
   letter-spacing: .2px;
+  pointer-events: auto;
 }
 
 .npcpv-open-button:hover { filter: brightness(.92); }
@@ -253,6 +254,14 @@
 .npcpv-settings-title { margin-bottom: 8px; color: var(--npcpv-accent, #2e7d32); font-weight: 800; }
 
 @media (max-width: 640px) {
+  .npcpv-open-button {
+    width: 54px;
+    height: 54px;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    font-size: 13px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.34);
+  }
   .npcpv-mask { align-items: stretch; justify-content: stretch; padding: 0; }
   .npcpv-modal { width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
   .npcpv-header { height: auto; min-height: 50px; align-items: flex-start; flex-direction: column; padding: 10px 12px 8px; gap: 8px; }
