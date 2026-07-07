@@ -648,6 +648,54 @@
   function inferFaction(text) { const m = String(text || '').match(/(?:势力|阵营|组织|所属)\s*[:：]\s*([^，。；;\n]{1,16})/); return m ? m[1].trim() : ''; }
   function inferIdentity(text) { const m = String(text || '').match(/(?:身份|职位|职业|职务|定位)\s*[:：]\s*([^\n]{1,180})/); return m ? m[1].trim() : ''; }
   
+  function lookupWorldbookInfo(npcName) {
+    let result = { faction: '', identity: '' };
+    try {
+      if (!window.world_info || !window.world_info.entries) return result;
+      const entries = Object.values(window.world_info.entries);
+      for (const entry of entries) {
+        const keys = Array.isArray(entry.key) ? entry.key : String(entry.key || '').split(',');
+        if (keys.some(k => k.trim() === npcName)) {
+          const content = entry.content || '';
+          result.faction = inferFaction(content);
+          result.identity = inferIdentity(content);
+          if (result.faction || result.identity) break;
+        }
+      }
+    } catch (e) {
+      console.warn('[NPC预览表] 读取世界书失败', e);
+    }
+    return result;
+  }
+
+  function addCandidate(map, name, sourceText) {
+    const clean = normalizeName(name);
+    if (!clean || clean.length < 2 || clean.length > 18) return;
+    if (/^(用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|名字|NPC名称|NPC姓名|NPC名字|身份|势力)$/.test(clean)) return;
+    if (!/[\u4e00-\u9fffA-Za-z]/.test(clean)) return;
+    
+    let currentFaction = inferFaction(sourceText);
+    let currentIdentity = inferIdentity(sourceText);
+
+    if (!currentFaction || !currentIdentity) {
+      const wbInfo = lookupWorldbookInfo(clean);
+      currentFaction = currentFaction || wbInfo.faction;
+      currentIdentity = currentIdentity || wbInfo.identity;
+    }
+
+    if (!map.has(clean)) {
+      map.set(clean, { 
+        name: clean, 
+        faction: currentFaction, 
+        identity: currentIdentity 
+      });
+    } else {
+      const item = map.get(clean);
+      item.faction = item.faction || currentFaction;
+      item.identity = item.identity || currentIdentity;
+    }
+  }
+  
   function addCandidate(map, name, sourceText) {
     const clean = normalizeName(name);
     if (!clean || clean.length < 2 || clean.length > 18) return;
