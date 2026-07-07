@@ -19,7 +19,7 @@
   ];
 
   const MOODS = [
-    ['calm', '平静', '😐'], ['happy', '愉悦', '😆'], ['angry', '愤怒', '😤'],
+    ['calm', '平静', '😐'], ['happy', '愉悦', '😊'], ['angry', '愤怒', '😤'],
     ['sad', '悲伤', '😿'], ['fear', '恐惧', '😱'], ['love', '爱意', '❤️'],
     ['jealous', '嫉妒', '👿'], ['annoyed', '烦躁', '😾'], ['excited', '兴奋', '🤩'],
     ['shy', '害羞', '😳'], ['guilty', '心虚', '🫢'], ['cold', '冷漠', '🧊'],
@@ -71,7 +71,12 @@
   function saveExtras(value) { localStorage.setItem(ctxKey(EXTRA_PREFIX), JSON.stringify(value)); }
 
   function defaultSettings() {
-    return { x: null, y: null, color: '#43a047', text: 'NPC', size: 46, panelColor: '#ffffff', accentColor: '#43a047', textColor: '#233323', collapsedGroups: {}, panelX: null, panelY: null, panelW: null, panelH: null, autoSyncInterval: 0 };
+    return { 
+      x: null, y: null, color: '#43a047', text: 'NPC', size: 46, 
+      panelColor: '#ffffff', accentColor: '#43a047', textColor: '#233323', 
+      collapsedGroups: {}, panelX: null, panelY: null, panelW: null, panelH: null,
+      apiUrl: 'https://api.openai.com/v1', apiKey: '', apiModel: 'gpt-4o-mini', autoSyncInterval: 0
+    };
   }
 
   function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -299,6 +304,208 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  function getChatTextForAi() {
+    try {
+      const ctx = window.SillyTavern?.getContext?.();
+      if (Array.isArray(ctx?.chat)) {
+        const recent = ctx.chat.filter(m => m.is_user || m.is_name).slice(-40);
+        return recent.map(m => `${m.name || (m.is_user ? 'User' : 'Character')}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
+      }
+    } catch (err) { console.warn('[NPC预览表] getContext.chat 读取失败', err); }
+    return '';
+  }
+
+  function extractJsonArray(text) {
+    const raw = String(text || '').trim();
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const body = fenced ? fenced[1].trim() : raw;
+    const direct = parse(body, null);
+    if (Array.isArray(direct)) return direct.map(normalizeAiNpc).filter(x => x['NPC名称']);
+    if (direct && typeof direct === 'object') {
+      const arr = direct.NPC列表 || direct.npcs || direct.NPCs || direct.data || direct.items || direct.list;
+      if (Array.isArray(arr)) return arr.map(normalizeAiNpc).filter(x => x['NPC名称']);
+      if (direct.NPC名称 || direct.name || direct.名字 || direct.名称) return [normalizeAiNpc(direct)].filter(x => x['NPC名称']);
+    }
+    const start = body.indexOf('[');
+    const end = body.lastIndexOf(']');
+    if (start >= 0 && end > start) {
+      const parsed = parse(body.slice(start, end + 1), []);
+      if (Array.isArray(parsed)) return parsed.map(normalizeAiNpc).filter(x => x['NPC名称']);
+    }
+    const objStart = body.indexOf('{');
+    const objEnd = body.lastIndexOf('}');
+    if (objStart >= 0 && objEnd > objStart) {
+      const parsed = parse(body.slice(objStart, objEnd + 1), null);
+      if (parsed && typeof parsed === 'object') {
+        const arr = parsed.NPC列表 || parsed.npcs || parsed.NPCs || parsed.data || parsed.items || parsed.list;
+        if (Array.isArray(arr)) return arr.map(normalizeAiNpc).filter(x => x['NPC名称']);
+        return [normalizeAiNpc(parsed)].filter(x => x['NPC名称']);
+      }
+    }
+    return [];
+  }
+
+  function normalizeAiNpc(item) {
+    if (!item || typeof item !== 'object') return {};
+    return {
+      'NPC名称': item.NPC名称 || item.name || item.名字 || item.名称 || item.NPC名字 || '',
+      '势力': item.势力 || item.阵营 || item.组织 || item.所属 || '',
+      '身份': item.身份 || item.职业 || item.职位 || item.身份介绍 || '',
+      '好感度': item.好感度 ?? item.好感 ?? 0,
+      '状态': item.状态 || 'offline',
+      '心情': item.心情 || 'calm',
+      '备注': item.备注 || item.说明 || '',
+      '首次登场': item.首次登场 || item.首次登场时间 || item.章节 || '',
+      '登场事件': item.登场事件 || item.首次登场事件 || item.发生了什么 || '',
+      'NPC关系': item.NPC关系 || item.关系 || '',
+      '好感历史': item.好感历史 || '[]',
+    };
+  }
+
+  async function syncAiFromChat(e, isBackground = false) {
+    const btn = e?.currentTarget;
+    const originalText = btn ? btn.textContent : '';
+    if (btn && !isBackground) {
+      btn.disabled = true;
+      btn.textContent = '扫描中...';
+    }
+    
+    const finish = () => {
+      if (btn && !isBackground) {
+        btn.disabled = false;
+        btn.textContent = originalText || '手动测试';
+      }
+    };
+
+    const notify = (msg, isError = false) => {
+      if (!isBackground) showNotice(msg);
+      else if (isError) console.warn('[NPC独立变量后台]', msg);
+      else console.log('[NPC独立变量后台]', msg);
+    };
+
+    try {
+      const cfg = buttonSettings();
+      if (!cfg.apiUrl || !cfg.apiKey || !cfg.apiModel) {
+          notify('请先在「API接口」面板中配置大模型 API 地址、密钥和模型名称。', true);
+          return finish();
+      }
+
+      const chat = getChatTextForAi();
+      if (!chat) {
+        notify('没有读取到近期聊天记录，无法进行提取。', true);
+        return finish();
+      }
+      
+      const messages = [
+        { role: 'system', content: '你是 NPC 数据整理器。只输出 JSON 数组，不要任何开头解释或Markdown说明。提取或更新以下对话中出现过的 NPC 状态。字段必须为：NPC名称, 势力, 身份, 好感度, 状态, 心情, 备注, 首次登场, 登场事件, NPC关系。若无新信息可留空或默认。' },
+        { role: 'user', content: `请从以下最近的聊天记录中整理出现过的 NPC，并补全可判断的信息。只输出 JSON 数组：\n\n${chat}` }
+      ];
+
+      let endpoint = cfg.apiUrl.trim().replace(/\/$/, '');
+      if (!endpoint.endsWith('/chat/completions')) {
+          endpoint += '/chat/completions';
+      }
+
+      const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${cfg.apiKey.trim()}`
+          },
+          body: JSON.stringify({
+              model: cfg.apiModel.trim(),
+              messages: messages,
+              temperature: 0.1,
+              max_tokens: 1500
+          })
+      });
+
+      if (!response.ok) {
+          let errText = response.statusText;
+          try { const errObj = await response.json(); errText = errObj.error?.message || errText; } catch (_) {}
+          throw new Error(`API 返回错误: ${response.status} - ${errText}`);
+      }
+
+      const data = await response.json();
+      let content = data?.choices?.[0]?.message?.content;
+      if (!content) throw new Error('API 返回格式异常，无法读取内容');
+
+      const list = extractJsonArray(content);
+      if (!list.length) {
+        notify('模型已响应，但未从中提取到可更新的 NPC 变动数据。', true);
+        return finish();
+      }
+      
+      let ok = 0;
+      for (const item of list) {
+        if (!item?.NPC名称) continue;
+        
+        const reg = registry();
+        const existing = reg.find(n => n.name === item['NPC名称']);
+        if (!existing) {
+          reg.push({ id: Date.now() + Math.random(), name: item['NPC名称'], faction: item['势力'] || '', identity: item['身份'] || '' });
+        } else {
+          existing.faction = item['势力'] || existing.faction;
+          existing.identity = item['身份'] || existing.identity;
+        }
+        saveRegistry(reg);
+        
+        const key = keyName(item['NPC名称']);
+        if (item['好感度'] !== undefined) await setVar(VAR_PREFIX + key + '_好感', item['好感度']);
+        if (item['状态']) await setVar(VAR_PREFIX + key + '_状态', item['状态']);
+        if (item['心情']) await setVar(VAR_PREFIX + key + '_心情', item['心情']);
+        if (item['备注']) await setVar(VAR_PREFIX + key + '_备注', item['备注']);
+        
+        const ex = extraFor(item['NPC名称']);
+        saveExtraFor(item['NPC名称'], {
+          firstSeen: item['首次登场'] || ex.firstSeen || '',
+          firstEvent: item['登场事件'] || ex.firstEvent || '',
+          relations: item['NPC关系'] || ex.relations || ''
+        });
+        
+        ok++;
+        await sleep(0);
+      }
+      
+      if (document.getElementById(PANEL_ID)) {
+          await loadRows();
+          render();
+      }
+      notify(`同步完成：成功调用独立 API，提取并更新了 ${ok} 个 NPC 数据。`);
+      finish();
+    } catch (err) {
+      console.error('[NPC预览表] 独立 API 同步失败', err);
+      notify('提取失败：' + (err?.message || String(err || '未知错误')), true);
+      finish();
+    }
+  }
+
+  function bindLiveUpdates() {
+    if (liveUpdateBound) return;
+    liveUpdateBound = true;
+    
+    try {
+      const ctx = window.SillyTavern?.getContext?.();
+      if (ctx?.eventSource && ctx?.event_types?.MESSAGE_RECEIVED) {
+        ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
+          const cfg = buttonSettings();
+          const interval = Number(cfg.autoSyncInterval) || 0;
+          
+          if (interval > 0) {
+            syncCounter++;
+            if (syncCounter >= interval) {
+              syncCounter = 0;
+              console.log(`[NPC独立变量后台] 聊天已达到 ${interval} 轮，正静默触发自动提取...`);
+              await syncAiFromChat(null, true);
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('[NPC预览表] 绑定轮次监听失败', e);
+    }
+  }
+
   function trendSvg(history, current) {
     const points = (Array.isArray(history) ? history : []).slice(-16);
     if (!points.length) points.push({ value: Number(current) || 0 });
@@ -355,202 +562,6 @@
       }
     } catch (_) {}
     localStorage.setItem(ctxKey('npcv_' + key + '_'), String(value));
-  }
-
-  function getChatTextForAi() {
-    try {
-      const ctx = window.SillyTavern?.getContext?.();
-      if (Array.isArray(ctx?.chat)) {
-        const recent = ctx.chat.filter(m => m.is_user || m.is_name).slice(-40);
-        return recent.map(m => `${m.name || (m.is_user ? 'User' : 'Character')}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
-      }
-    } catch (err) { console.warn('[NPC预览表] getContext.chat 读取失败', err); }
-    return '';
-  }
-
-  let generateRawFn = null;
-  async function getGenerateRaw() {
-    if (generateRawFn) return generateRawFn;
-    if (typeof window.generateRaw === 'function') {
-      generateRawFn = window.generateRaw;
-      return generateRawFn;
-    }
-    // Fallback checks for SillyTavern module scopes
-    try {
-      const module = await import('../../../../script.js');
-      generateRawFn = module.generateRaw;
-      return generateRawFn;
-    } catch (e) {}
-    try {
-      const module = await import('../../../script.js');
-      generateRawFn = module.generateRaw;
-      return generateRawFn;
-    } catch (e) {}
-    return null;
-  }
-
-  function extractJsonArray(text) {
-    const raw = String(text || '').trim();
-    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const body = fenced ? fenced[1].trim() : raw;
-    const direct = parse(body, null);
-    if (Array.isArray(direct)) return direct.map(normalizeAiNpc).filter(x => x['NPC名称']);
-    if (direct && typeof direct === 'object') {
-      const arr = direct.NPC列表 || direct.npcs || direct.NPCs || direct.data || direct.items || direct.list;
-      if (Array.isArray(arr)) return arr.map(normalizeAiNpc).filter(x => x['NPC名称']);
-      if (direct.NPC名称 || direct.name || direct.名字 || direct.名称) return [normalizeAiNpc(direct)].filter(x => x['NPC名称']);
-    }
-    const start = body.indexOf('[');
-    const end = body.lastIndexOf(']');
-    if (start >= 0 && end > start) {
-      const parsed = parse(body.slice(start, end + 1), []);
-      if (Array.isArray(parsed)) return parsed.map(normalizeAiNpc).filter(x => x['NPC名称']);
-    }
-    const objStart = body.indexOf('{');
-    const objEnd = body.lastIndexOf('}');
-    if (objStart >= 0 && objEnd > objStart) {
-      const parsed = parse(body.slice(objStart, objEnd + 1), null);
-      if (parsed && typeof parsed === 'object') {
-        const arr = parsed.NPC列表 || parsed.npcs || parsed.NPCs || parsed.data || parsed.items || parsed.list;
-        if (Array.isArray(arr)) return arr.map(normalizeAiNpc).filter(x => x['NPC名称']);
-        return [normalizeAiNpc(parsed)].filter(x => x['NPC名称']);
-      }
-    }
-    return [];
-  }
-
-  function normalizeAiNpc(item) {
-    if (!item || typeof item !== 'object') return {};
-    return {
-      'NPC名称': item.NPC名称 || item.name || item.名字 || item.名称 || item.NPC名字 || '',
-      '势力': item.势力 || item.阵营 || item.组织 || item.所属 || '',
-      '身份': item.身份 || item.职业 || item.职位 || item.身份介绍 || '',
-      '好感度': item.好感度 ?? item.好感 ?? 0,
-      '状态': item.状态 || 'offline',
-      '心情': item.心情 || 'calm',
-      '备注': item.备注 || item.说明 || '',
-      '首次登场': item.首次登场 || item.首次登场时间 || item.章节 || '',
-      '登场事件': item.登场事件 || item.首次登场事件 || item.发生了什么 || '',
-      'NPC关系': item.NPC关系 || item.关系 || '',
-      '好感历史': item.好感历史 || '[]',
-    };
-  }
-
-  async function syncAiFromChat(e) {
-    const btn = e?.currentTarget || document.querySelector('[data-action="api-info"]');
-    const originalText = btn ? btn.textContent : '';
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = '提取中...';
-    }
-    const finish = () => {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = originalText || '手动提取';
-      }
-    };
-    try {
-      const generateRaw = await getGenerateRaw();
-      if (!generateRaw) {
-        showNotice('无法获取原生 AI 接口。请确保酒馆处于运行中。');
-        return finish();
-      }
-
-      const chat = getChatTextForAi();
-      if (!chat) {
-        showNotice('没有读取到近期聊天记录，无法进行提取。');
-        return finish();
-      }
-      
-      const messages = [
-        { role: 'system', content: '你是 NPC 数据整理器。只输出 JSON 数组，不要任何开头解释或Markdown说明。提取或更新以下对话中出现过的 NPC 状态。字段必须为：NPC名称, 势力, 身份, 好感度, 状态, 心情, 备注, 首次登场, 登场事件, NPC关系。若无新信息可留空或默认。' },
-        { role: 'user', content: `请从以下最近的聊天记录中整理出现过的 NPC，并补全可判断的信息。只输出 JSON 数组：\n\n${chat}` }
-      ];
-
-      console.log('[NPC预览表] 开始静默调用原生 AI 进行分析...');
-      let response = '';
-      try {
-        response = await generateRaw({ messages, quiet: true });
-      } catch (err) {
-        response = await generateRaw(messages, true); 
-      }
-
-      if (typeof response !== 'string') {
-        response = String(response?.text || response || '');
-      }
-
-      const list = extractJsonArray(response);
-      if (!list.length) {
-        showNotice('模型已响应，但未从中提取到可更新的 NPC 变动数据。');
-        return finish();
-      }
-      
-      let ok = 0;
-      for (const item of list) {
-        if (!item?.NPC名称) continue;
-        
-        const reg = registry();
-        const existing = reg.find(n => n.name === item['NPC名称']);
-        if (!existing) {
-          reg.push({ id: Date.now() + Math.random(), name: item['NPC名称'], faction: item['势力'] || '', identity: item['身份'] || '' });
-        } else {
-          existing.faction = item['势力'] || existing.faction;
-          existing.identity = item['身份'] || existing.identity;
-        }
-        saveRegistry(reg);
-        
-        const key = keyName(item['NPC名称']);
-        if (item['好感度'] !== undefined) await setVar(VAR_PREFIX + key + '_好感', item['好感度']);
-        if (item['状态']) await setVar(VAR_PREFIX + key + '_状态', item['状态']);
-        if (item['心情']) await setVar(VAR_PREFIX + key + '_心情', item['心情']);
-        if (item['备注']) await setVar(VAR_PREFIX + key + '_备注', item['备注']);
-        
-        const ex = extraFor(item['NPC名称']);
-        saveExtraFor(item['NPC名称'], {
-          firstSeen: item['首次登场'] || ex.firstSeen || '',
-          firstEvent: item['登场事件'] || ex.firstEvent || '',
-          relations: item['NPC关系'] || ex.relations || ''
-        });
-        
-        ok++;
-        await sleep(0);
-      }
-      
-      await loadRows();
-      render();
-      showNotice(`原生同步完成：成功提取并更新了 ${ok} 个 NPC 的数据。`);
-      finish();
-    } catch (err) {
-      console.error('[NPC预览表] 原生同步失败', err);
-      showNotice('提取失败：' + (err?.message || String(err || '未知错误')));
-      finish();
-    }
-  }
-
-  function bindLiveUpdates() {
-    if (liveUpdateBound) return;
-    liveUpdateBound = true;
-    
-    const ctx = window.SillyTavern?.getContext?.();
-    if (ctx?.eventSource && ctx?.event_types?.MESSAGE_RECEIVED) {
-      ctx.eventSource.on(ctx.event_types.MESSAGE_RECEIVED, async () => {
-        const cfg = buttonSettings();
-        const interval = Number(cfg.autoSyncInterval) || 0;
-        
-        if (interval > 0) {
-          syncCounter++;
-          if (syncCounter >= interval) {
-            syncCounter = 0;
-            console.log(`[NPC预览表] 已达到 ${interval} 轮，后台触发自动提取...`);
-            await syncAiFromChat();
-            if (document.getElementById(PANEL_ID)) {
-                await loadRows();
-                render();
-            }
-          }
-        }
-      });
-    }
   }
 
   async function readVars() {
@@ -678,7 +689,7 @@
     
     const backBtn = `<button class="npcpv-btn npcpv-back-btn" data-action="back-to-list">⬅ 返回NPC列表</button>`;
     
-    return `${backBtn}<div class="npcpv-profile"><div class="npcpv-big-avatar" data-action="avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}<span>上传头像</span></div><div class="npcpv-profile-text"><div class="npcpv-main-name">${esc(name)}</div><div class="npcpv-main-sub">${esc(row['势力'] || '未分组')}</div><div class="npcpv-main-sub long">${esc(row['身份'] || '')}</div></div></div><div class="npcpv-section"><div class="npcpv-label">分组 / 势力</div><input class="npcpv-input" data-action="faction" value="${esc(row['势力'] || '')}" placeholder="例如：星耀传媒、黑市、王城"></div><div class="npcpv-section"><div class="npcpv-label">身份介绍</div><textarea class="npcpv-textarea npcpv-identity" data-action="identity" placeholder="例如：星耀传媒旗下影帝 / 体验派演员 / 曾获金...">${esc(row['身份'] || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">首次登场时间 / 章节</div><input class="npcpv-input" data-action="first-seen" value="${esc(ex.firstSeen || '')}" placeholder="例如：第3章 / 初见舞台 / 2026-07-06"></div><div class="npcpv-section"><div class="npcpv-label">首次登场发生了什么</div><textarea class="npcpv-textarea" data-action="first-event" placeholder="记录第一次出现的位置和事件，方便回溯">${esc(ex.firstEvent || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">好感度 <span class="npcpv-small">变量：${VAR_PREFIX + keyName(name) + '_好感'}</span></div><div class="npcpv-aff"><div class="npcpv-affbar"><div class="npcpv-afffill" style="width:${Math.min(Math.abs(aff),100)}%;background:${affectionColor(aff)}"></div></div><div class="npcpv-affval" style="color:${affectionColor(aff)}">${aff}</div></div>${trendSvg(ex.history, aff)}<div class="npcpv-ctrls">${[-10,-5,-1,1,5,10].map(n => `<button class="npcpv-btn" data-action="aff" data-delta="${n}">${n > 0 ? '+' : ''}${n}</button>`).join('')}</div></div><div class="npcpv-section"><div class="npcpv-label">NPC关系</div><textarea class="npcpv-textarea" data-action="relations" placeholder="输入相关 NPC 名字，用顿号、逗号或换行分隔">${esc(ex.relations || '')}</textarea>${relationGraphHtml(row)}</div><div class="npcpv-section"><div class="npcpv-label">状态</div><select class="npcpv-select" data-action="status">${STATUSES.map(s => `<option value="${s[0]}" ${s[0] === (row['状态'] || 'offline') ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">心情 <span class="npcpv-small">${mood[2]}</span></div><select class="npcpv-select" data-action="mood">${MOODS.map(m => `<option value="${m[0]}" ${m[0] === (row['心情'] || 'calm') ? 'selected' : ''}>${m[2]} ${m[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">备注</div><textarea class="npcpv-textarea" data-action="notes">${esc(row['备注'] || '')}</textarea></div><div class="npcpv-ctrls"><button class="npcpv-btn danger" data-action="delete">删除NPC</button></div>`;
+    return `${backBtn}<div class="npcpv-profile"><div class="npcpv-big-avatar" data-action="avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}<span>上传头像</span></div><div class="npcpv-profile-text"><div class="npcpv-main-name">${esc(name)}</div><div class="npcpv-main-sub">${esc(row['势力'] || '未分组')}</div><div class="npcpv-main-sub long">${esc(row['身份'] || '')}</div></div></div><div class="npcpv-section"><div class="npcpv-label">分组 / 势力</div><input class="npcpv-input" data-action="faction" value="${esc(row['势力'] || '')}" placeholder="例如：星耀传媒、黑市、王城"></div><div class="npcpv-section"><div class="npcpv-label">身份介绍</div><textarea class="npcpv-textarea npcpv-identity" data-action="identity" placeholder="例如：星耀传媒旗下影帝 / 体验派演员 / 曾获金...">${esc(row['身份'] || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">首次登场时间 / 章节</div><input class="npcpv-input" data-action="first-seen" value="${esc(ex.firstSeen || '')}" placeholder="例如：第3章 / 初见舞台 / 2026-07-06"></div><div class="npcpv-section"><div class="npcpv-label">首次登场发生了什么</div><textarea class="npcpv-textarea" data-action="first-event" placeholder="记录第一次出现的位置和事件，方便回溯">${esc(ex.firstEvent || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">好感度 <span class="npcpv-small">纯变量模式：${VAR_PREFIX + keyName(name) + '_好感'}</span></div><div class="npcpv-aff"><div class="npcpv-affbar"><div class="npcpv-afffill" style="width:${Math.min(Math.abs(aff),100)}%;background:${affectionColor(aff)}"></div></div><div class="npcpv-affval" style="color:${affectionColor(aff)}">${aff}</div></div>${trendSvg(ex.history, aff)}<div class="npcpv-ctrls">${[-10,-5,-1,1,5,10].map(n => `<button class="npcpv-btn" data-action="aff" data-delta="${n}">${n > 0 ? '+' : ''}${n}</button>`).join('')}</div></div><div class="npcpv-section"><div class="npcpv-label">NPC关系</div><textarea class="npcpv-textarea" data-action="relations" placeholder="输入相关 NPC 名字，用顿号、逗号或换行分隔">${esc(ex.relations || '')}</textarea>${relationGraphHtml(row)}</div><div class="npcpv-section"><div class="npcpv-label">状态</div><select class="npcpv-select" data-action="status">${STATUSES.map(s => `<option value="${s[0]}" ${s[0] === (row['状态'] || 'offline') ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">心情 <span class="npcpv-small">${mood[2]}</span></div><select class="npcpv-select" data-action="mood">${MOODS.map(m => `<option value="${m[0]}" ${m[0] === (row['心情'] || 'calm') ? 'selected' : ''}>${m[2]} ${m[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">备注</div><textarea class="npcpv-textarea" data-action="notes">${esc(row['备注'] || '')}</textarea></div><div class="npcpv-ctrls"><button class="npcpv-btn danger" data-action="delete">删除NPC</button></div>`;
   }
 
   function render() {
@@ -690,7 +701,8 @@
     const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     const viewClass = selected ? 'view-detail' : 'view-list';
     
-    root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">纯变量模式</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="api-info">API接口</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    // 【更新核心点】更改了右上角的入口按钮
+    root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">纯变量独立模式</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="api-setup" style="background:#0288d1; border-color:#0288d1; font-weight: 800;">🔌 API与自动同步</button><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="data-io">导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">外观设置</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
     
     applyPanelTheme(root);
     bindEvents(root);
@@ -703,7 +715,10 @@
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
-    root.querySelector('[data-action="api-info"]')?.addEventListener('click', showApiDialog);
+    
+    // 【更新核心点】绑定新的 API 设置面板
+    root.querySelector('[data-action="api-setup"]')?.addEventListener('click', showApiSetupDialog);
+    
     root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
     root.querySelector('[data-action="data-io"]')?.addEventListener('click', showDataDialog);
     root.querySelector('[data-action="batch-import"]')?.addEventListener('click', showBatchImportDialog);
@@ -776,32 +791,65 @@
     });
   }
 
-  function showApiDialog() {
+  function showApiSetupDialog() {
+    const cfg = buttonSettings();
     showSubDialog(`
-      <h3>🔌 NPCPreviewAPI 接口说明</h3>
-      <div class="npcpv-notice" style="user-select: text;">
-        <p>本插件已向酒馆暴露纯同步的全局 API。你可以直接在<b>快速回复 (Quick Reply)</b> 或 <b>酒馆宏</b> 中复制使用以下代码：</p>
-        
-        <div style="background: #f1f8f2; padding: 10px; border-radius: 8px; margin: 10px 0; border: 1px solid #dcebdc;">
-          <b>1. 获取单个好感度/心情（常用）</b><br>
-          <code style="display:block; margin-top:6px; color:#c62828;">{{//javascript NPCPreviewAPI.getValue('张三', '好感度')}}</code>
-          <code style="display:block; margin-top:6px; color:#c62828;">{{//javascript NPCPreviewAPI.getValue('张三', '心情')}}</code>
+      <h3>🔌 独立大模型 API 与自动同步配置</h3>
+      <div class="npcpv-notice" style="margin-bottom: 12px; color: #2e7d32; font-weight:bold;">
+        在这里配置独立的 API，让插件在后台自动提取变量，彻底摆脱一切框架依赖。
+      </div>
+      <div class="npcpv-form">
+        <div>
+          <div class="npcpv-label">API 代理地址 (Base URL)</div>
+          <input class="npcpv-input" id="npc-api-url" placeholder="兼容 OpenAI 的地址，如 https://api.openai.com/v1" value="${esc(cfg.apiUrl || 'https://api.openai.com/v1')}">
         </div>
-
-        <div style="background: #f1f8f2; padding: 10px; border-radius: 8px; margin: 10px 0; border: 1px solid #dcebdc;">
-          <b>2. 外部脚本静默修改 NPC 数据</b><br>
-          <code style="display:block; margin-top:6px; color:#2e7d32;">NPCPreviewAPI.update('张三', { '好感度': 100, '状态': 'online' })</code>
-          <span style="font-size:11px; color:#666;">（修改后会自动存储，并实时刷新可视化面板）</span>
+        <div>
+          <div class="npcpv-label">API 密钥 (API Key)</div>
+          <input class="npcpv-input" type="password" id="npc-api-key" placeholder="sk-..." value="${esc(cfg.apiKey || '')}">
+        </div>
+        <div>
+          <div class="npcpv-label">模型名称 (Model)</div>
+          <input class="npcpv-input" id="npc-api-model" placeholder="gpt-4o-mini 或 claude-3-haiku" value="${esc(cfg.apiModel || 'gpt-4o-mini')}">
+        </div>
+        <div style="margin-top: 10px; border-top: 1px dashed #dcebdc; padding-top: 14px;">
+          <div class="npcpv-label" style="color:#d84315;">🚀 后台自动同步间隔（聊天轮次）</div>
+          <input class="npcpv-input" type="number" id="npc-api-interval" placeholder="设为 0 即为纯手动，设为 5 则每 5 句话后台扫描一次" value="${Number(cfg.autoSyncInterval) || 0}" min="0" max="100">
+          <div class="npcpv-small" style="margin-top:6px; line-height:1.5;">
+            设置间隔后，系统会在背后静默调用上方配置的 API 更新数据，完全不打断你的打字。<br>
+            <i>进阶用法：若想在酒馆宏中调用已存的变量，可用 <code>{{//javascript NPCPreviewAPI.getValue('张三', '好感度')}}</code></i>
+          </div>
         </div>
       </div>
-      <div class="npcpv-dialog-actions" style="justify-content: space-between;">
-        <button class="npcpv-btn primary" id="npc-api-force-sync" style="background:#0288d1; border-color:#0288d1;">🤖 手动触发AI扫描提取</button>
-        <button class="npcpv-btn" data-subclose="1">关闭说明</button>
+      <div class="npcpv-dialog-actions" style="margin-top: 20px; justify-content: space-between;">
+        <button class="npcpv-btn primary" id="npc-api-force-sync" style="background:#0288d1; border-color:#0288d1; font-weight:800;">🤖 保存并立刻手动提取一次</button>
+        <div>
+          <button class="npcpv-btn" data-subclose="1">取消</button>
+          <button class="npcpv-btn primary" id="npc-api-save">仅保存配置</button>
+        </div>
       </div>
     `, () => {
-      document.getElementById('npc-api-force-sync').onclick = (e) => {
+      const saveCfg = () => {
+        const newCfg = {
+          ...buttonSettings(),
+          apiUrl: document.getElementById('npc-api-url').value.trim() || 'https://api.openai.com/v1',
+          apiKey: document.getElementById('npc-api-key').value.trim(),
+          apiModel: document.getElementById('npc-api-model').value.trim() || 'gpt-4o-mini',
+          autoSyncInterval: Number(document.getElementById('npc-api-interval').value) || 0
+        };
+        saveButtonSettings(newCfg);
+        return newCfg;
+      };
+
+      document.getElementById('npc-api-save').onclick = () => {
+        saveCfg();
         closeSubDialog();
-        syncAiFromChat(e);
+        showNotice('独立 API 与同步配置已保存。');
+      };
+
+      document.getElementById('npc-api-force-sync').onclick = async (e) => {
+        saveCfg();
+        closeSubDialog();
+        await syncAiFromChat(e, false);
       };
     });
   }
@@ -860,12 +908,12 @@
 
   function showButtonDialog() {
     const cfg = buttonSettings();
-    showSubDialog(`<h3>外观与自动提取设置</h3><div class="npcpv-form"><input class="npcpv-input" id="npc-btn-text" placeholder="按钮文字或图标" value="${esc(cfg.text)}"><label class="npcpv-small">悬浮按钮颜色</label><input class="npcpv-input" id="npc-btn-color" type="color" value="${esc(cfg.color)}"><label class="npcpv-small">面板主色</label><input class="npcpv-input" id="npc-accent-color" type="color" value="${esc(cfg.accentColor || '#43a047')}"><label class="npcpv-small">面板背景</label><input class="npcpv-input" id="npc-panel-color" type="color" value="${esc(cfg.panelColor || '#ffffff')}"><label class="npcpv-small">文字颜色</label><input class="npcpv-input" id="npc-text-color" type="color" value="${esc(cfg.textColor || '#233323')}"><label class="npcpv-small">按钮尺寸：<span id="npc-btn-size-val">${Number(cfg.size) || 46}</span>px</label><input class="npcpv-range" id="npc-btn-size" type="range" min="34" max="86" value="${Number(cfg.size) || 46}"><label class="npcpv-small" style="margin-top:10px; font-weight:bold;">🚀 自动同步间隔（聊天轮次，设为 0 即为关闭）</label><input class="npcpv-input" id="npc-btn-interval" type="number" min="0" max="100" value="${Number(cfg.autoSyncInterval) || 0}" placeholder="设为 5 则每5句话后台自动扫描一次"></div><div class="npcpv-small" style="margin-top:8px">自动同步会在后台静默调用当前所选的大模型以更新数据（不打扰聊天）。</div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-btn-ok">保存</button></div>`, () => {
+    showSubDialog(`<h3>外观设置</h3><div class="npcpv-form"><input class="npcpv-input" id="npc-btn-text" placeholder="按钮文字或图标" value="${esc(cfg.text)}"><label class="npcpv-small">悬浮按钮颜色</label><input class="npcpv-input" id="npc-btn-color" type="color" value="${esc(cfg.color)}"><label class="npcpv-small">面板主色</label><input class="npcpv-input" id="npc-accent-color" type="color" value="${esc(cfg.accentColor || '#43a047')}"><label class="npcpv-small">面板背景</label><input class="npcpv-input" id="npc-panel-color" type="color" value="${esc(cfg.panelColor || '#ffffff')}"><label class="npcpv-small">文字颜色</label><input class="npcpv-input" id="npc-text-color" type="color" value="${esc(cfg.textColor || '#233323')}"><label class="npcpv-small">按钮尺寸：<span id="npc-btn-size-val">${Number(cfg.size) || 46}</span>px</label><input class="npcpv-range" id="npc-btn-size" type="range" min="34" max="86" value="${Number(cfg.size) || 46}"></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-btn-ok">保存</button></div>`, () => {
       const size = document.getElementById('npc-btn-size');
       const sizeVal = document.getElementById('npc-btn-size-val');
       size.oninput = () => { sizeVal.textContent = size.value; };
       document.getElementById('npc-btn-ok').onclick = () => {
-        saveButtonSettings({ ...buttonSettings(), text: document.getElementById('npc-btn-text').value.trim() || 'NPC', color: document.getElementById('npc-btn-color').value, accentColor: document.getElementById('npc-accent-color').value, panelColor: document.getElementById('npc-panel-color').value, textColor: document.getElementById('npc-text-color').value, size: Number(size.value) || 46, autoSyncInterval: Number(document.getElementById('npc-btn-interval').value) || 0 });
+        saveButtonSettings({ ...buttonSettings(), text: document.getElementById('npc-btn-text').value.trim() || 'NPC', color: document.getElementById('npc-btn-color').value, accentColor: document.getElementById('npc-accent-color').value, panelColor: document.getElementById('npc-panel-color').value, textColor: document.getElementById('npc-text-color').value, size: Number(size.value) || 46 });
         applyButtonSettings();
         applyPanelTheme(document.getElementById(PANEL_ID));
         closeSubDialog();
@@ -1160,10 +1208,8 @@
   }
 
   window.NPCPreviewAPI = {
-    // 强制触发一次同步
-    syncNow: async () => await syncAiFromChat(),
+    syncNow: async () => await syncAiFromChat(null, false),
     
-    // 同步获取某个 NPC 的完整 JSON 数据
     get: (name) => {
       const reg = registry();
       const item = reg.find(n => n.name === name);
@@ -1183,14 +1229,12 @@
       };
     },
 
-    // 同步获取 NPC 的单个指定数值（如 NPCPreviewAPI.getValue('张三', '好感度')）
     getValue: (name, key) => {
       const npc = window.NPCPreviewAPI.get(name);
       if (!npc) return '';
       return npc[key] !== undefined ? npc[key] : '';
     },
 
-    // 外部修改 NPC 数据接口
     update: async (name, data) => {
        const reg = registry();
        let item = reg.find(n => n.name === name);
@@ -1212,7 +1256,6 @@
        render();
     },
 
-    // 同步获取全部 NPC 名单
     list: () => {
        return registry().map(n => window.NPCPreviewAPI.get(n.name)).filter(Boolean);
     }
