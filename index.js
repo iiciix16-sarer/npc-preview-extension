@@ -152,6 +152,7 @@
        if(!reg) return '';
        if(keyAttr === '势力') return reg.faction;
        if(keyAttr === '身份') return reg.identity;
+       
        const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', 'NPC关系': '_关系' };
        const suffix = attrMap[keyAttr];
        if(!suffix) return '';
@@ -170,13 +171,18 @@
        saveRegistry(reg);
        
        const key = keyName(name);
-       const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', 'NPC关系': '_关系' };
+       const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', 'NPC关系': '_关系', '关系': '_关系' };
        for(let k in attrMap) {
-          if(dataObj[k] !== undefined) setVarSync(VAR_PREFIX + key + attrMap[k], dataObj[k]);
+          if(dataObj[k] !== undefined && dataObj[k] !== null && dataObj[k] !== '') {
+              setVarSync(VAR_PREFIX + key + attrMap[k], dataObj[k]);
+          }
        }
-       if (document.getElementById(PANEL_ID)) { loadRowsSync(); render(); }
+       loadRowsSync();
+       render();
     },
-    syncNow: async function() { await doAISync(false); },
+    syncNow: async function() {
+       await doAISync(false);
+    },
     list: function() { return registry().map(r => r.name); }
   };
 
@@ -218,18 +224,6 @@
      }
   }
 
-  function statusOf(value) { return STATUSES.find(x => x[0] === value) || STATUSES[0]; }
-  function moodOf(value) { return MOODS.find(x => x[0] === value) || MOODS[0]; }
-  function affectionColor(value) {
-    const n = Number(value) || 0;
-    if (n < 0) return '#e53935';
-    if (n >= 80) return '#2e7d32';
-    if (n >= 50) return '#43a047';
-    if (n >= 20) return '#81c784';
-    if (n > 0) return '#c8e6c9';
-    return '#bdbdbd';
-  }
-
   function parseHistory(value) {
     if (Array.isArray(value)) return value;
     return parse(String(value || '[]'), []);
@@ -253,7 +247,7 @@
     const links = parseRelations(relText);
     const validLinks = links.filter(l => names.includes(l.name)).slice(0, 8);
     
-    if (!validLinks.length) return '<div class="npcpv-empty compact">暂无网状关系。<br>格式：名字(关系)、名字(关系)</div>';
+    if (!validLinks.length) return '<div class="npcpv-empty compact">暂无网状关系。<br>由AI自动记录，或输入：名字(关系)</div>';
     
     const center = { x: 130, y: 85 };
     const r = 62;
@@ -267,9 +261,9 @@
         const midX = (center.x + p.x)/2;
         const midY = (center.y + p.y)/2;
         let color = '#bdbdbd';
-        if (['宿敌','仇人','敌对','讨厌','嫉妒'].includes(p.label)) color = '#e53935';
-        if (['挚友','情侣','喜欢','爱慕','贴贴','爱意'].includes(p.label)) color = '#e91e63';
-        if (['手下','上司','同僚','主仆','师徒'].includes(p.label)) color = '#1e88e5';
+        if (['宿敌','仇人','敌对','讨厌','嫉妒','仇视'].includes(p.label)) color = '#e53935';
+        if (['挚友','情侣','喜欢','爱慕','贴贴','爱意','暗恋'].includes(p.label)) color = '#e91e63';
+        if (['手下','上司','同僚','主仆','师徒','从属'].includes(p.label)) color = '#1e88e5';
         
         return `<line x1="${center.x}" y1="${center.y}" x2="${p.x}" y2="${p.y}" stroke="${color}" stroke-width="1.5"></line>
                 <rect x="${midX-16}" y="${midY-7}" width="32" height="14" fill="#ffffff" rx="3" stroke="${color}" stroke-width="0.5"></rect>
@@ -308,7 +302,7 @@
   async function doAISync(isSilent = false) {
     const cfg = buttonSettings();
     if (!cfg.apiKey) {
-       if(!isSilent) showToast('请点击 API与UI 按钮，配置你的 API Key 后再同步');
+       if(!isSilent) showToast('请点击 API与说明 按钮，配置你的 API Key 后再同步');
        return;
     }
     
@@ -318,6 +312,12 @@
        if(!isSilent) { toggleLoading(false); showToast('未读取到聊天记录'); }
        return;
     }
+
+    // 更新AI指令：加入了中英双格式说明和关系的强制格式要求
+    const systemPrompt = `你是NPC状态判定器。仅输出纯JSON数组，绝对不要有任何解释或markdown格式。
+数组对象允许使用中文或对应英文键名：NPC名称(name), 势力(faction), 身份(identity), 好感度(affection, 必须是数字), 状态(status: online/offline/away/danger/missing), 心情(mood: calm/happy/angry/sad/love/fear/excited/shy/guilty/cold), 备注(notes), 首次登场(first_seen), 登场事件(first_event), NPC关系(relations)。
+【极其重要】：NPC关系(relations) 字段必须严格使用"名字(关系标签)"格式，并用顿号或逗号分隔。例如："李四(挚友)、王五(宿敌)"。
+若某NPC未在近期被提及，不要返回。`;
     
     try {
        const res = await fetch(cfg.apiUrl, {
@@ -326,7 +326,7 @@
           body: JSON.stringify({
              model: cfg.apiModel,
              messages: [
-               { role: 'system', content: '你是NPC状态判定器。仅输出纯JSON数组，绝对不要有任何解释或markdown格式。数组中每个对象字段严格匹配：NPC名称, 势力, 身份, 好感度, 状态(online/offline/away/danger/missing), 心情(calm/happy/angry/sad/love/fear/excited/shy/guilty/cold), 备注, 首次登场, 登场事件, NPC关系。若某NPC未被提及，不要返回。' },
+               { role: 'system', content: systemPrompt },
                { role: 'user', content: `请提取以下最新对话中出现的NPC状态变化：\n\n${chat}` }
              ],
              temperature: 0.2
@@ -350,11 +350,20 @@
        
        let count = 0;
        for (const item of list) {
-          if (!item['NPC名称']) continue;
-          window.NPCPreviewAPI.update(item['NPC名称'], {
-             '势力': item['势力'], '身份': item['身份'], '好感度': item['好感度'],
-             '状态': item['状态'], '心情': item['心情'], '备注': item['备注'],
-             '首次登场': item['首次登场'], '登场事件': item['登场事件'], 'NPC关系': item['NPC关系']
+          // 强化容错：中英双解
+          const npcName = item['NPC名称'] || item['name'] || item['npc_name'];
+          if (!npcName) continue;
+
+          window.NPCPreviewAPI.update(npcName, {
+             '势力': item['势力'] || item['faction'],
+             '身份': item['身份'] || item['identity'],
+             '好感度': item['好感度'] ?? item['affection'] ?? item['score'],
+             '状态': item['状态'] || item['status'],
+             '心情': item['心情'] || item['mood'],
+             '备注': item['备注'] || item['notes'] || item['note'],
+             '首次登场': item['首次登场'] || item['first_seen'],
+             '登场事件': item['登场事件'] || item['first_event'],
+             '关系': item['NPC关系'] || item['relations'] || item['relation']
           });
           count++;
        }
@@ -446,7 +455,7 @@
       if (!grouped.has(group)) grouped.set(group, []);
       grouped.get(group).push(row);
     }
-    if (!grouped.size) return '<div class="npcpv-empty" style="grid-column:1/-1">未检索到NPC档案<br>点击右上角「+ 新NPC」或「批量导入」</div>';
+    if (!grouped.size) return '<div class="npcpv-empty" style="grid-column:1/-1">未检索到NPC档案<br>点击右上角「批量导入」添加数据</div>';
     return Array.from(grouped.entries()).map(([group, list]) => `<div class="npcpv-group"><button class="npcpv-group-title" data-group="${esc(group)}">${collapsed[group] ? '▸' : '▾'} ${esc(group)} <span>${list.length}</span></button><div class="npcpv-group-cards ${collapsed[group] ? 'collapsed' : ''}">${list.map(r => cardHtml(r, selected && String(r.id) === String(selected.id))).join('')}</div></div>`).join('');
   }
 
@@ -471,7 +480,7 @@
     <select class="npcpv-select" data-action="mood">${MOODS.map(m => `<option value="${m[0]}" ${m[0] === (row['心情'] || 'calm') ? 'selected' : ''}>${m[2]} ${m[1]}</option>`).join('')}</select>
     </div></div>
     
-    <div class="npcpv-section"><div class="npcpv-label">社交关系网 <span class="npcpv-small">格式：名字(关系)、名字(关系)</span></div>
+    <div class="npcpv-section"><div class="npcpv-label">社交关系网 <span class="npcpv-small">（AI可自动解析）</span></div>
     <textarea class="npcpv-textarea" data-action="relations" placeholder="例如：李四(挚友)、王五(宿敌)">${esc(row['NPC关系'] || '')}</textarea>
     ${relationGraphHtml(row)}
     </div>
@@ -499,7 +508,6 @@
            <button class="npcpv-btn" data-action="local-refresh">🔄 刷新</button>
            <button class="npcpv-btn" data-action="batch-import">批量导入</button>
            <button class="npcpv-btn primary" data-action="api-settings">🔌 API与说明</button>
-           <button class="npcpv-btn" data-action="add">+ 新NPC</button>
            <button class="npcpv-btn danger" data-action="clear-all">清空</button>
            <button class="npcpv-close" data-action="close">×</button>
          </div>
@@ -525,11 +533,11 @@
     root.querySelector('.npcpv-root')?.addEventListener('pointerdown', startPanelDrag);
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
-    root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
     root.querySelector('[data-action="batch-import"]')?.addEventListener('click', showBatchImportDialog);
     root.querySelector('[data-action="clear-all"]')?.addEventListener('click', () => { if(confirm('彻底抹除所有NPC变量？')) { saveRegistry([]); loadRowsSync(); render(); } });
     root.querySelector('[data-action="api-settings"]')?.addEventListener('click', showApiDocsDialog);
     
+    // 纯本地无Token消耗刷新
     root.querySelector('[data-action="local-refresh"]')?.addEventListener('click', () => {
          loadRowsSync();
          render();
@@ -553,6 +561,7 @@
       card.addEventListener('drop', e => { e.preventDefault(); reorderNpc(e.dataTransfer.getData('text/plain'), card.dataset.id); });
     });
     
+    // Wiki式穿透点击跳转
     root.querySelectorAll('.npcpv-node.clickable').forEach(node => {
       node.addEventListener('click', () => {
          const tName = node.getAttribute('data-npc');
@@ -603,17 +612,6 @@
     saveExtras(all);
     loadRowsSync();
     render();
-  }
-
-  function showAddDialog() {
-    showSubDialog(`<h3>添加新角色</h3><div class="npcpv-form"><input class="npcpv-input" id="npc-add-name" placeholder="NPC名称 (必填)"><input class="npcpv-input" id="npc-add-faction" placeholder="所属阵营"><input class="npcpv-input" id="npc-add-identity" placeholder="表面身份"></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-add-ok">添加入册</button></div>`, () => {
-      document.getElementById('npc-add-ok').onclick = () => {
-        const name = document.getElementById('npc-add-name').value.trim();
-        if (!name) return;
-        window.NPCPreviewAPI.update(name, { '势力': document.getElementById('npc-add-faction').value.trim(), '身份': document.getElementById('npc-add-identity').value.trim() });
-        closeSubDialog();
-      };
-    });
   }
 
   function normalizeName(value) { return String(value || '').replace(/[《》【】\[\]「」『』“”"'`]/g, '').replace(/\s+/g, '').trim(); }
@@ -916,7 +914,7 @@
   function updateViewportVars() { document.documentElement.style.setProperty('--npcpv-vw', window.innerWidth+'px'); document.documentElement.style.setProperty('--npcpv-vh', window.innerHeight+'px'); }
 
   function boot() {
-    updateViewportVars(); ensureButton(); keepButtonVisible();
+    updateViewportVars(); ensureButton(); keepButtonVisible(); loadRowsSync();
     if(!window._npcpv_obs) {
         window._npcpv_obs = new MutationObserver(() => { if (!document.getElementById(BUTTON_ID)) ensureButton(); });
         window._npcpv_obs.observe(document.body, { childList: true });
