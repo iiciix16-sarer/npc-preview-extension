@@ -188,13 +188,7 @@
     list: function() { return registry().map(r => r.name); }
   };
 
- if (window.eventSource && !window._npcpv_event_bound) {
-      window._npcpv_event_bound = true;
-      window.eventSource.on('chat_completion', () => {
-          // 只要聊天回复完成，立刻在后台静默执行一次同步
-          doAISync(false); 
-      });
-  }
+
 
   function showToast(msg) {
     const t = document.createElement('div');
@@ -864,15 +858,43 @@
     btn.style.left = x + 'px'; btn.style.top = y + 'px'; btn.style.right = 'auto'; btn.style.bottom = 'auto';
   }
 
-  function applyButtonSettings() {
+function applyButtonSettings() {
     const btn = document.getElementById(BUTTON_ID);
     const cfg = buttonSettings();
     if (btn) {
-       btn.style.background = cfg.color || '#43a047';
-       btn.style.width = (cfg.size || 46) + 'px';
-       btn.style.height = (cfg.size || 46) + 'px';
-       btn.style.fontSize = Math.max(11, Math.round((cfg.size || 46) / 3.8)) + 'px';
-       btn.innerHTML = cfg.text ? esc(cfg.text) : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>`;
+        // 如果按钮当前处于同步状态，则跳过背景更新以避免冲突
+        if (btn.dataset.syncing !== 'true') {
+            btn.style.background = cfg.color || '#43a047';
+        }
+        btn.style.width = (cfg.size || 46) + 'px';
+        btn.style.height = (cfg.size || 46) + 'px';
+        btn.style.fontSize = Math.max(11, Math.round((cfg.size || 46) / 3.8)) + 'px';
+        btn.innerHTML = cfg.text ? esc(cfg.text) : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>`;
+    }
+  }
+
+  function setButtonSyncing(isSyncing) {
+    const btn = document.getElementById(BUTTON_ID);
+    if (!btn) return;
+    if (isSyncing) {
+        // 存储原始背景颜色，如果尚未存储的话
+        if (!btn.dataset.originalBackground) {
+            btn.dataset.originalBackground = btn.style.background || '';
+        }
+        // 设置同步状态数据属性
+        btn.dataset.syncing = 'true';
+        // 设置同步颜色 - 使用与手动同步按钮相同的蓝色
+        btn.style.background = '#1976d2';
+    } else {
+        // 恢复原始背景颜色
+        const original = btn.dataset.originalBackground;
+        if (original !== undefined) {
+            btn.style.background = original;
+            // 清除数据属性以避免泄漏
+            delete btn.dataset.originalBackground;
+        }
+        // 删除同步状态数据属性
+        delete btn.dataset.syncing;
     }
   }
 
@@ -936,12 +958,22 @@
 
   function updateViewportVars() { document.documentElement.style.setProperty('--npcpv-vw', window.innerWidth+'px'); document.documentElement.style.setProperty('--npcpv-vh', window.innerHeight+'px'); }
 
-  function boot() {
-    updateViewportVars(); ensureButton(); keepButtonVisible(); loadRowsSync();
-    if(!window._npcpv_obs) {
-        window._npcpv_obs = new MutationObserver(() => { if (!document.getElementById(BUTTON_ID)) ensureButton(); });
-        window._npcpv_obs.observe(document.body, { childList: true });
-    }
+function boot() {
+      updateViewportVars(); ensureButton(); keepButtonVisible(); loadRowsSync();
+      // 绑定聊天完成事件以自动同步NPC状态
+      if (window.eventSource && !window._npcpv_event_bound) {
+          window._npcpv_event_bound = true;
+          window.eventSource.on('chat_completion', () => {
+              setButtonSyncing(true);
+              doAISync(false).finally(() => {
+                  setButtonSyncing(false);
+              });
+          });
+      }
+      if(!window._npcpv_obs) {
+          window._npcpv_obs = new MutationObserver(() => { if (!document.getElementById(BUTTON_ID)) ensureButton(); });
+          window._npcpv_obs.observe(document.body, { childList: true });
+      }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
