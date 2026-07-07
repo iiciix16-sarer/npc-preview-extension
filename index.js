@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  // --- 样式自动注入，确保所有新UI组件立刻生效 ---
+  // --- 样式自动注入 ---
   const style = document.createElement('style');
   style.innerHTML = `
     .npcpv-loading-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.6); backdrop-filter: blur(4px); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s; opacity: 0; pointer-events: none; border-radius: 14px; }
@@ -12,20 +12,21 @@
     .npcpv-toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px); background: #323232; color: #fff; padding: 10px 24px; border-radius: 24px; font-size: 13px; font-weight: 500; opacity: 0; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 999999; pointer-events: none; box-shadow: 0 4px 16px rgba(0,0,0,0.2); text-align: center; }
     .npcpv-toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
     
-    /* 关系网格图定制 */
     .npcpv-node.clickable { cursor: pointer; transition: transform 0.2s; }
     .npcpv-node.clickable:hover { transform: scale(1.1); }
     .npcpv-node.clickable circle { fill: #fff; stroke: var(--npcpv-accent); stroke-width: 2; transition: fill 0.2s; }
     .npcpv-node.clickable:hover circle { fill: var(--npcpv-soft); }
     .npcpv-edge-label { fill: #6e826e; font-size: 8.5px; font-weight: bold; pointer-events: none; }
     
-    /* 折叠开发者控制台 */
     .npcpv-api-docs { background: #fbfdfb; border: 1px solid #dcebdc; border-radius: 8px; margin-bottom: 14px; font-size: 12px; overflow: hidden; }
     .npcpv-api-docs summary { padding: 10px 12px; font-weight: 800; cursor: pointer; outline: none; user-select: none; color: var(--npcpv-accent); background: var(--npcpv-soft); transition: background 0.2s; }
     .npcpv-api-docs summary:hover { background: #e8f5e9; }
     .npcpv-doc-content { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
     .npcpv-doc-content code { background: #f1f8f2; padding: 6px 10px; border-radius: 6px; font-family: monospace; color: #2e7d32; user-select: all; border: 1px dashed #cfe5d0; }
     .npcpv-doc-desc { color: #6e826e; font-size: 11px; margin-bottom: 2px; }
+    .npcpv-import-row { display: grid; grid-template-columns: minmax(72px, .8fr) minmax(72px, .8fr) minmax(160px, 1.8fr); gap: 6px; align-items: start; border: 1px solid #e5efe5; border-radius: 7px; padding: 6px 8px; background: #fbfdfb; color: #5f735f; font-size: 12px; margin-bottom:4px; }
+    .npcpv-import-row b { overflow-wrap: anywhere; color: var(--npcpv-accent, #2e7d32); }
+    .npcpv-import-preview { max-height: 190px; overflow: auto; margin-top:10px; }
   `;
   document.head.appendChild(style);
 
@@ -151,7 +152,6 @@
        if(!reg) return '';
        if(keyAttr === '势力') return reg.faction;
        if(keyAttr === '身份') return reg.identity;
-       
        const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', 'NPC关系': '_关系' };
        const suffix = attrMap[keyAttr];
        if(!suffix) return '';
@@ -174,12 +174,9 @@
        for(let k in attrMap) {
           if(dataObj[k] !== undefined) setVarSync(VAR_PREFIX + key + attrMap[k], dataObj[k]);
        }
-       loadRowsSync();
-       render();
+       if (document.getElementById(PANEL_ID)) { loadRowsSync(); render(); }
     },
-    syncNow: async function() {
-       await doAISync(false);
-    },
+    syncNow: async function() { await doAISync(false); },
     list: function() { return registry().map(r => r.name); }
   };
 
@@ -219,6 +216,18 @@
      } else {
         overlay.classList.remove('active');
      }
+  }
+
+  function statusOf(value) { return STATUSES.find(x => x[0] === value) || STATUSES[0]; }
+  function moodOf(value) { return MOODS.find(x => x[0] === value) || MOODS[0]; }
+  function affectionColor(value) {
+    const n = Number(value) || 0;
+    if (n < 0) return '#e53935';
+    if (n >= 80) return '#2e7d32';
+    if (n >= 50) return '#43a047';
+    if (n >= 20) return '#81c784';
+    if (n > 0) return '#c8e6c9';
+    return '#bdbdbd';
   }
 
   function parseHistory(value) {
@@ -299,7 +308,7 @@
   async function doAISync(isSilent = false) {
     const cfg = buttonSettings();
     if (!cfg.apiKey) {
-       if(!isSilent) showToast('请点击 API与说明 按钮，配置你的 OpenAI Key 后再同步');
+       if(!isSilent) showToast('请点击 API与UI 按钮，配置你的 API Key 后再同步');
        return;
     }
     
@@ -345,7 +354,7 @@
           window.NPCPreviewAPI.update(item['NPC名称'], {
              '势力': item['势力'], '身份': item['身份'], '好感度': item['好感度'],
              '状态': item['状态'], '心情': item['心情'], '备注': item['备注'],
-             '首次登场': item['首次登场'], '登场事件': item['登场事件'], '关系': item['NPC关系']
+             '首次登场': item['首次登场'], '登场事件': item['登场事件'], 'NPC关系': item['NPC关系']
           });
           count++;
        }
@@ -437,7 +446,7 @@
       if (!grouped.has(group)) grouped.set(group, []);
       grouped.get(group).push(row);
     }
-    if (!grouped.size) return '<div class="npcpv-empty" style="grid-column:1/-1">未检索到NPC档案<br>点击右上角「+ 新NPC」</div>';
+    if (!grouped.size) return '<div class="npcpv-empty" style="grid-column:1/-1">未检索到NPC档案<br>点击右上角「+ 新NPC」或「批量导入」</div>';
     return Array.from(grouped.entries()).map(([group, list]) => `<div class="npcpv-group"><button class="npcpv-group-title" data-group="${esc(group)}">${collapsed[group] ? '▸' : '▾'} ${esc(group)} <span>${list.length}</span></button><div class="npcpv-group-cards ${collapsed[group] ? 'collapsed' : ''}">${list.map(r => cardHtml(r, selected && String(r.id) === String(selected.id))).join('')}</div></div>`).join('');
   }
 
@@ -488,6 +497,7 @@
          <div class="npcpv-title">NPC 面板 <span class="npcpv-mode">纯变量引擎</span></div>
          <div class="npcpv-actions">
            <button class="npcpv-btn" data-action="local-refresh">🔄 刷新</button>
+           <button class="npcpv-btn" data-action="batch-import">批量导入</button>
            <button class="npcpv-btn primary" data-action="api-settings">🔌 API与说明</button>
            <button class="npcpv-btn" data-action="add">+ 新NPC</button>
            <button class="npcpv-btn danger" data-action="clear-all">清空</button>
@@ -516,10 +526,10 @@
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
+    root.querySelector('[data-action="batch-import"]')?.addEventListener('click', showBatchImportDialog);
     root.querySelector('[data-action="clear-all"]')?.addEventListener('click', () => { if(confirm('彻底抹除所有NPC变量？')) { saveRegistry([]); loadRowsSync(); render(); } });
     root.querySelector('[data-action="api-settings"]')?.addEventListener('click', showApiDocsDialog);
     
-    // 纯本地无Token消耗刷新
     root.querySelector('[data-action="local-refresh"]')?.addEventListener('click', () => {
          loadRowsSync();
          render();
@@ -543,7 +553,6 @@
       card.addEventListener('drop', e => { e.preventDefault(); reorderNpc(e.dataTransfer.getData('text/plain'), card.dataset.id); });
     });
     
-    // Wiki式穿透点击跳转
     root.querySelectorAll('.npcpv-node.clickable').forEach(node => {
       node.addEventListener('click', () => {
          const tName = node.getAttribute('data-npc');
@@ -607,10 +616,73 @@
     });
   }
 
+  function normalizeName(value) { return String(value || '').replace(/[《》【】\[\]「」『』“”"'`]/g, '').replace(/\s+/g, '').trim(); }
+  function splitNames(value) { return String(value || '').replace(/[\[\]【】]/g, '\n').split(/[、,，/|；;\n\r]+/).map(v => v.replace(/^\s*(?:[-*•]|\d+[.、])\s*/g, '').replace(/(?:身份|势力|阵营|组织|职业|职位|职务|定位)\s*[:：].*$/g, '').trim()).filter(Boolean); }
+  function inferFaction(text) { const m = String(text || '').match(/(?:势力|阵营|组织|所属)\s*[:：]\s*([^，。；;\n]{1,16})/); return m ? m[1].trim() : ''; }
+  function inferIdentity(text) { const m = String(text || '').match(/(?:身份|职位|职业|职务|定位)\s*[:：]\s*([^\n]{1,180})/); return m ? m[1].trim() : ''; }
+  
+  function addCandidate(map, name, sourceText) {
+    const clean = normalizeName(name);
+    if (!clean || clean.length < 2 || clean.length > 18) return;
+    if (/^(用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|名字|NPC名称|NPC姓名|NPC名字|身份|势力)$/.test(clean)) return;
+    if (!/[\u4e00-\u9fffA-Za-z]/.test(clean)) return;
+    if (!map.has(clean)) map.set(clean, { name: clean, faction: inferFaction(sourceText), identity: inferIdentity(sourceText) });
+    const item = map.get(clean);
+    item.faction = item.faction || inferFaction(sourceText);
+    item.identity = item.identity || inferIdentity(sourceText);
+  }
+
+  function parseImportNames(text) {
+    const map = new Map();
+    const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    for (const line of lines) {
+      let matched = false;
+      const labeled = /(?:NPC名字|NPC名称|NPC姓名|名字|姓名|名称)\s*[:：=]\s*(.+)$/i.exec(line);
+      if (labeled) {
+        splitNames(labeled[1]).forEach(name => addCandidate(map, name, line));
+        matched = true;
+      }
+      if (!matched) splitNames(line).forEach(name => addCandidate(map, name, line));
+    }
+    return Array.from(map.values());
+  }
+
+  function previewImportHtml(items) {
+    if (!items.length) return '<div class="npcpv-empty compact" style="margin-top:10px;">未解析到可导入的NPC名字</div>';
+    return items.map(item => `<div class="npcpv-import-row"><b>${esc(item.name)}</b><span>${esc(item.faction || '未识别势力')}</span><span>${esc(item.identity || '未识别身份')}</span></div>`).join('');
+  }
+
+  function showBatchImportDialog() {
+    showSubDialog(`<h3>批量导入NPC</h3><div class="npcpv-form"><textarea class="npcpv-textarea" id="npc-import-text" placeholder="粘贴名单，支持一行一个，或带标签如：NPC名字：张三"></textarea><div class="npcpv-import-preview" id="npc-import-preview"></div></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-import-ok">全部添加</button></div>`, () => {
+      const input = document.getElementById('npc-import-text');
+      const preview = document.getElementById('npc-import-preview');
+      let parsed = [];
+      input.addEventListener('input', () => {
+         parsed = parseImportNames(input.value);
+         preview.innerHTML = previewImportHtml(parsed);
+      });
+      document.getElementById('npc-import-ok').onclick = () => {
+         const reg = registry();
+         let added = 0;
+         for(const item of parsed) {
+            if(!reg.find(r => r.name === item.name)) {
+               reg.push({ id: Date.now() + Math.random(), name: item.name, faction: item.faction || '', identity: item.identity || '' });
+               added++;
+            }
+         }
+         saveRegistry(reg);
+         loadRowsSync();
+         render();
+         closeSubDialog();
+         showToast(`导入成功：新增 ${added} 个NPC`);
+      };
+    });
+  }
+
   function showApiDocsDialog() {
     const cfg = buttonSettings();
     showSubDialog(`
-      <h3>🔌 状态扫描器与 API</h3>
+      <h3>🔌 状态扫描器与配置</h3>
       <div class="npcpv-api-docs">
         <details>
           <summary>👨‍💻 开发者控制台 (酒馆宏调用代码)</summary>
@@ -634,6 +706,17 @@
         <label class="npcpv-label" style="margin-top:8px;">后台自动同步间隔 (聊天轮次)</label>
         <input class="npcpv-input" id="cfg-interval" type="number" min="0" max="100" value="${cfg.autoSyncInterval}" placeholder="设为 0 则关闭自动同步">
         <div class="npcpv-small">设为 0 仅保留下方手动分析。设为 N，则每聊 N 句话插件自动静默调用上述 API。</div>
+        
+        <label class="npcpv-label" style="margin-top:14px; border-top:1px solid #eee; padding-top:14px;">🎨 悬浮球与面板外观</label>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <input class="npcpv-input" id="cfg-btn-text" placeholder="按钮文字" value="${esc(cfg.text)}" style="width:45%;">
+            <div style="display:flex; align-items:center; width:45%; gap:5px;"><label class="npcpv-small">按钮</label><input class="npcpv-input" id="cfg-btn-color" type="color" value="${esc(cfg.color)}" style="padding:2px; height:28px;"></div>
+            <div style="display:flex; align-items:center; width:30%; gap:5px;"><label class="npcpv-small">主色</label><input class="npcpv-input" id="cfg-accent" type="color" value="${esc(cfg.accentColor)}" style="padding:2px; height:28px;"></div>
+            <div style="display:flex; align-items:center; width:30%; gap:5px;"><label class="npcpv-small">背景</label><input class="npcpv-input" id="cfg-panel" type="color" value="${esc(cfg.panelColor)}" style="padding:2px; height:28px;"></div>
+            <div style="display:flex; align-items:center; width:30%; gap:5px;"><label class="npcpv-small">文字</label><input class="npcpv-input" id="cfg-text" type="color" value="${esc(cfg.textColor)}" style="padding:2px; height:28px;"></div>
+        </div>
+        <label class="npcpv-small" style="margin-top:4px;">按钮尺寸: <span id="cfg-size-val">${cfg.size}</span>px</label>
+        <input class="npcpv-range" id="cfg-size" type="range" min="34" max="86" value="${cfg.size}">
       </div>
       
       <div class="npcpv-dialog-actions" style="margin-top:20px; justify-content: space-between;">
@@ -644,14 +727,26 @@
         </div>
       </div>
     `, () => {
+      const sizeInput = document.getElementById('cfg-size');
+      const sizeVal = document.getElementById('cfg-size-val');
+      sizeInput.oninput = () => sizeVal.textContent = sizeInput.value;
+
       document.getElementById('cfg-save').onclick = () => {
          saveButtonSettings({
             ...buttonSettings(),
             apiUrl: document.getElementById('cfg-url').value.trim(),
             apiKey: document.getElementById('cfg-key').value.trim(),
             apiModel: document.getElementById('cfg-model').value.trim(),
-            autoSyncInterval: parseInt(document.getElementById('cfg-interval').value) || 0
+            autoSyncInterval: parseInt(document.getElementById('cfg-interval').value) || 0,
+            text: document.getElementById('cfg-btn-text').value.trim() || 'NPC',
+            color: document.getElementById('cfg-btn-color').value,
+            accentColor: document.getElementById('cfg-accent').value,
+            panelColor: document.getElementById('cfg-panel').value,
+            textColor: document.getElementById('cfg-text').value,
+            size: Number(document.getElementById('cfg-size').value) || 46
          });
+         applyButtonSettings();
+         applyPanelTheme(document.getElementById(PANEL_ID));
          closeSubDialog();
          showToast('系统配置已生效');
       };
@@ -737,7 +832,6 @@
     if (document.getElementById(BUTTON_ID) || !document.body) return;
     const btn = document.createElement('button');
     btn.id = BUTTON_ID; btn.className = 'npcpv-open-button';
-    btn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>`;
     btn.addEventListener('pointerdown', startButtonDrag);
     document.body.appendChild(btn); applyButtonSettings();
   }
@@ -745,7 +839,7 @@
   function keepButtonVisible() {
     const btn = document.getElementById(BUTTON_ID);
     if (!btn) return;
-    const size = 46;
+    const size = buttonSettings().size || 46;
     const x = Math.max(8, Math.min(window.innerWidth - size - 8, parseFloat(btn.style.left) || window.innerWidth-60));
     const y = Math.max(8, Math.min(window.innerHeight - size - 8, parseFloat(btn.style.top) || window.innerHeight-100));
     btn.style.left = x + 'px'; btn.style.top = y + 'px'; btn.style.right = 'auto'; btn.style.bottom = 'auto';
@@ -753,7 +847,14 @@
 
   function applyButtonSettings() {
     const btn = document.getElementById(BUTTON_ID);
-    if (btn) btn.style.background = buttonSettings().color || '#43a047';
+    const cfg = buttonSettings();
+    if (btn) {
+       btn.style.background = cfg.color || '#43a047';
+       btn.style.width = (cfg.size || 46) + 'px';
+       btn.style.height = (cfg.size || 46) + 'px';
+       btn.style.fontSize = Math.max(11, Math.round((cfg.size || 46) / 3.8)) + 'px';
+       btn.innerHTML = cfg.text ? esc(cfg.text) : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>`;
+    }
   }
 
   function applyPanelTheme(root) {
@@ -772,13 +873,18 @@
     const move = ev => {
       if (!buttonDrag) return;
       if (Math.abs(ev.clientX - buttonDrag.startX) + Math.abs(ev.clientY - buttonDrag.startY) > 4) buttonDrag.moved = true;
-      btn.style.left = Math.max(4, Math.min(window.innerWidth - 46 - 4, buttonDrag.left + (ev.clientX - buttonDrag.startX))) + 'px';
-      btn.style.top = Math.max(4, Math.min(window.innerHeight - 46 - 4, buttonDrag.top + (ev.clientY - buttonDrag.startY))) + 'px';
+      const size = buttonSettings().size || 46;
+      btn.style.left = Math.max(4, Math.min(window.innerWidth - size - 4, buttonDrag.left + (ev.clientX - buttonDrag.startX))) + 'px';
+      btn.style.top = Math.max(4, Math.min(window.innerHeight - size - 4, buttonDrag.top + (ev.clientY - buttonDrag.startY))) + 'px';
     };
     const up = () => {
       if (buttonDrag && !buttonDrag.moved) {
-          if (document.getElementById(PANEL_ID)) closePanel();
-          else { loadRowsSync(); openPanel(); }
+          if (document.getElementById(PANEL_ID)) {
+             closePanel();
+          } else { 
+             loadRowsSync(); 
+             openPanel(); 
+          }
       }
       setTimeout(() => { buttonDrag = null; }, 0);
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
@@ -810,7 +916,7 @@
   function updateViewportVars() { document.documentElement.style.setProperty('--npcpv-vw', window.innerWidth+'px'); document.documentElement.style.setProperty('--npcpv-vh', window.innerHeight+'px'); }
 
   function boot() {
-    updateViewportVars(); ensureButton(); keepButtonVisible(); loadRowsSync();
+    updateViewportVars(); ensureButton(); keepButtonVisible();
     if(!window._npcpv_obs) {
         window._npcpv_obs = new MutationObserver(() => { if (!document.getElementById(BUTTON_ID)) ensureButton(); });
         window._npcpv_obs.observe(document.body, { childList: true });
