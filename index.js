@@ -37,6 +37,13 @@
   let settingsEntryBound = false;
   let buttonObserver = null;
   let lastButtonOpenAt = 0;
+  
+  // 新增：拖拽面板状态变量
+  let panelX = null;
+  let panelY = null;
+  let panelW = null;
+  let panelH = null;
+  let panelDrag = null;
 
   function ctxKey(prefix) {
     try {
@@ -68,7 +75,8 @@
   function saveExtras(value) { localStorage.setItem(ctxKey(EXTRA_PREFIX), JSON.stringify(value)); }
 
   function defaultSettings() {
-    return { x: null, y: null, color: '#43a047', text: 'NPC', size: 46, panelColor: '#ffffff', accentColor: '#43a047', textColor: '#233323', collapsedGroups: {} };
+    // 新增 panelX, panelY, panelW, panelH 字段
+    return { x: null, y: null, color: '#43a047', text: 'NPC', size: 46, panelColor: '#ffffff', accentColor: '#43a047', textColor: '#233323', collapsedGroups: {}, panelX: null, panelY: null, panelW: null, panelH: null };
   }
 
   function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -732,15 +740,23 @@
     const selected = rows.find(r => String(r.id) === String(selectedId));
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const warn = mode === '数据库模式' && dbMissingColumns.length ? `<div class="npcpv-db-warn">数据库缺列：${esc(dbMissingColumns.join('、'))}。请补齐后 AI 才能实时维护这些字段。</div>` : '';
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    
+    // 修改：使用 npcpv-root 替换 mask，并应用保存的尺寸和位置
+    const styleAttr = `${panelW ? `width:${panelW}px;` : ''}${panelH ? `height:${panelH}px;` : ''}${panelX != null ? `left:${panelX}px;top:${panelY}px;transform:none;` : ''}`;
+    
+    root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header npcpv-drag-handle"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    
     applyPanelTheme(root);
     bindEvents(root);
   }
 
   function bindEvents(root) {
     const selected = rows.find(r => String(r.id) === String(selectedId));
-    root.querySelector('[data-close]')?.addEventListener('click', e => { if (e.target.dataset.close) closePanel(); });
+    
+    // 新增：为标题栏绑定拖拽事件
+    root.querySelector('.npcpv-drag-handle')?.addEventListener('pointerdown', startPanelDrag);
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
+    
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
     root.querySelector('[data-action="ai-sync"]')?.addEventListener('click', syncAiFromChat);
     root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
@@ -797,7 +813,9 @@
     div.className = 'npcpv-modal-sub';
     div.id = 'npcpv-subdialog';
     div.innerHTML = `<div class="npcpv-dialog">${html}</div>`;
-    root.querySelector('.npcpv-modal').appendChild(div);
+    
+    // 修改：附加到 npcpv-root 以实现相对定位
+    root.querySelector('.npcpv-root').appendChild(div);
     div.querySelectorAll('[data-subclose]').forEach(b => b.addEventListener('click', closeSubDialog));
     if (after) after();
   }
@@ -914,16 +932,29 @@
   async function openPanel() {
     updateViewportVars();
     bindLiveUpdates();
+    
+    // 修改：打开时从设置恢复面板位置和尺寸
+    const cfg = buttonSettings();
+    panelX = cfg.panelX;
+    panelY = cfg.panelY;
+    panelW = cfg.panelW;
+    panelH = cfg.panelH;
+    
     let root = document.getElementById(PANEL_ID);
     if (!root) {
       root = document.createElement('div');
       root.id = PANEL_ID;
       document.body.appendChild(root);
     }
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
+    
+    const styleAttr = `${panelW ? `width:${panelW}px;` : ''}${panelH ? `height:${panelH}px;` : ''}${panelX != null ? `left:${panelX}px;top:${panelY}px;transform:none;` : ''}`;
+    
+    root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header npcpv-drag-handle"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
+    
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
-    root.querySelector('[data-close]')?.addEventListener('click', e => { if (e.target.dataset.close) closePanel(); });
+    root.querySelector('.npcpv-drag-handle')?.addEventListener('pointerdown', startPanelDrag);
     applyPanelTheme(root);
+    
     try {
       await loadRows();
     } catch (err) {
@@ -934,7 +965,67 @@
     render();
   }
 
-  function closePanel() { document.getElementById(PANEL_ID)?.remove(); }
+  function closePanel() { 
+    // 修改：关闭前记录当前面板的坐标和尺寸，并存入 settings
+    const win = document.querySelector('.npcpv-root');
+    if (win) {
+      panelX = parseFloat(win.style.left) || null;
+      panelY = parseFloat(win.style.top) || null;
+      panelW = parseFloat(win.style.width) || win.offsetWidth;
+      panelH = parseFloat(win.style.height) || win.offsetHeight;
+      const cfg = buttonSettings();
+      saveButtonSettings({ ...cfg, panelX, panelY, panelW, panelH });
+    }
+    document.getElementById(PANEL_ID)?.remove(); 
+  }
+  
+  // 新增：面板拖拽函数
+  function startPanelDrag(e) {
+    // 防止点击按钮或输入框时触发拖动
+    if (e.target.closest('.npcpv-actions') || e.target.closest('button') || e.target.closest('input')) return;
+    
+    const win = document.querySelector('.npcpv-root');
+    if (!win) return;
+    
+    const rect = win.getBoundingClientRect();
+    const style = window.getComputedStyle(win);
+    
+    // 如果窗口是默认居中的（含有 transform），将其转换为绝对 left/top 以便拖拽
+    if (style.transform && style.transform !== 'none') {
+      win.style.transform = 'none';
+      win.style.left = rect.left + 'px';
+      win.style.top = rect.top + 'px';
+    }
+    
+    panelDrag = { 
+      startX: e.clientX, 
+      startY: e.clientY, 
+      left: parseFloat(win.style.left) || rect.left, 
+      top: parseFloat(win.style.top) || rect.top 
+    };
+    win.setPointerCapture?.(e.pointerId);
+
+    const move = ev => {
+      if (!panelDrag) return;
+      const dx = ev.clientX - panelDrag.startX;
+      const dy = ev.clientY - panelDrag.startY;
+      win.style.left = (panelDrag.left + dx) + 'px';
+      win.style.top = (panelDrag.top + dy) + 'px';
+    };
+    
+    const up = () => {
+      if (win) {
+         panelX = parseFloat(win.style.left) || null;
+         panelY = parseFloat(win.style.top) || null;
+      }
+      panelDrag = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
 
   function ensureButton() {
     if (document.getElementById(BUTTON_ID)) return;
