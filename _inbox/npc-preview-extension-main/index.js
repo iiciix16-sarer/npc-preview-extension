@@ -32,6 +32,7 @@
   let filter = '全部';
   let query = '';
   let buttonDrag = null;
+  let panelDrag = null;
   let dbMissingColumns = [];
   let liveUpdateBound = false;
   let settingsEntryBound = false;
@@ -68,7 +69,7 @@
   function saveExtras(value) { localStorage.setItem(ctxKey(EXTRA_PREFIX), JSON.stringify(value)); }
 
   function defaultSettings() {
-    return { x: null, y: null, color: '#43a047', text: 'NPC', size: 46, panelColor: '#ffffff', accentColor: '#43a047', textColor: '#233323', collapsedGroups: {} };
+    return { x: null, y: null, color: '#43a047', text: 'NPC', size: 46, panelColor: '#ffffff', accentColor: '#43a047', textColor: '#233323', collapsedGroups: {}, panelX: null, panelY: null, panelW: null, panelH: null };
   }
 
   function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -732,15 +733,15 @@
     const selected = rows.find(r => String(r.id) === String(selectedId));
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const warn = mode === '数据库模式' && dbMissingColumns.length ? `<div class="npcpv-db-warn">数据库缺列：${esc(dbMissingColumns.join('、'))}。请补齐后 AI 才能实时维护这些字段。</div>` : '';
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    root.innerHTML = `<div class="npcpv-modal"><div class="npcpv-header npcpv-drag-handle"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div>`;
     applyPanelTheme(root);
     bindEvents(root);
   }
 
   function bindEvents(root) {
     const selected = rows.find(r => String(r.id) === String(selectedId));
-    root.querySelector('[data-close]')?.addEventListener('click', e => { if (e.target.dataset.close) closePanel(); });
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
+    root.querySelector('.npcpv-drag-handle')?.addEventListener('pointerdown', startPanelDrag);
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
     root.querySelector('[data-action="ai-sync"]')?.addEventListener('click', syncAiFromChat);
     root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
@@ -918,11 +919,25 @@
     if (!root) {
       root = document.createElement('div');
       root.id = PANEL_ID;
+      root.className = 'npcpv-root';
       document.body.appendChild(root);
     }
-    root.innerHTML = `<div class="npcpv-mask" data-close="1"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
+    const cfg = buttonSettings();
+    const vw = window.innerWidth || 360;
+    const vh = window.innerHeight || 640;
+    const pw = Math.min(vw - 16, Math.max(360, cfg.panelW || 0)) || Math.min(vw - 16, 860);
+    const ph = Math.min(vh - 16, Math.max(280, cfg.panelH || 0)) || Math.min(vh - 16, 680);
+    const px = cfg.panelX != null ? Math.max(4, Math.min(vw - pw - 4, cfg.panelX)) : Math.max(4, (vw - pw) / 2);
+    const py = cfg.panelY != null ? Math.max(4, Math.min(vh - ph - 4, cfg.panelY)) : Math.max(4, (vh - ph) / 2);
+    root.style.left = px + 'px';
+    root.style.top = py + 'px';
+    root.style.width = pw + 'px';
+    root.style.height = ph + 'px';
+    root.style.right = 'auto';
+    root.style.bottom = 'auto';
+    root.innerHTML = `<div class="npcpv-modal"><div class="npcpv-header npcpv-drag-handle"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div>`;
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
-    root.querySelector('[data-close]')?.addEventListener('click', e => { if (e.target.dataset.close) closePanel(); });
+    root.querySelector('.npcpv-drag-handle')?.addEventListener('pointerdown', startPanelDrag);
     applyPanelTheme(root);
     try {
       await loadRows();
@@ -934,7 +949,14 @@
     render();
   }
 
-  function closePanel() { document.getElementById(PANEL_ID)?.remove(); }
+  function closePanel() {
+    const root = document.getElementById(PANEL_ID);
+    if (!root) return;
+    const cfg = buttonSettings();
+    const rect = root.getBoundingClientRect();
+    saveButtonSettings({ ...cfg, panelX: rect.left, panelY: rect.top, panelW: rect.width, panelH: rect.height });
+    root.remove();
+  }
 
   function ensureButton() {
     if (document.getElementById(BUTTON_ID)) return;
@@ -944,8 +966,13 @@
     btn.className = 'npcpv-open-button';
     btn.title = 'NPC预览表：点击打开，拖动移动位置';
     btn.addEventListener('pointerdown', startButtonDrag);
+    btn.addEventListener('touchend', e => {
+      if (Date.now() - lastButtonOpenAt < 450) return;
+      lastButtonOpenAt = Date.now();
+      e.preventDefault();
+      openPanel().catch(reportOpenError);
+    }, { passive: false });
     btn.addEventListener('click', e => {
-      if (buttonDrag) return;
       if (Date.now() - lastButtonOpenAt < 450) return;
       lastButtonOpenAt = Date.now();
       openPanel(e).catch(reportOpenError);
@@ -1067,6 +1094,53 @@
       if (!buttonDrag || ev.pointerId !== buttonDrag.pointerId) return;
       cleanup();
       buttonDrag = null;
+    };
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up, { passive: false });
+    window.addEventListener('pointercancel', cancel, { passive: false });
+  }
+
+  function startPanelDrag(e) {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault();
+    const root = document.getElementById(PANEL_ID);
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    panelDrag = { startX: e.clientX, startY: e.clientY, left: rect.left, top: rect.top, width: rect.width, height: rect.height, moved: false, pointerId: e.pointerId };
+    root.setPointerCapture?.(e.pointerId);
+    const resizeThreshold = 16;
+    const move = ev => {
+      if (!panelDrag || ev.pointerId !== panelDrag.pointerId) return;
+      const dx = ev.clientX - panelDrag.startX;
+      const dy = ev.clientY - panelDrag.startY;
+      if (!panelDrag.moved && Math.hypot(dx, dy) < 4) return;
+      panelDrag.moved = true;
+      const vw = window.innerWidth || 360;
+      const vh = window.innerHeight || 640;
+      const x = Math.max(0, Math.min(vw - panelDrag.width, panelDrag.left + dx));
+      const y = Math.max(0, Math.min(vh - panelDrag.height, panelDrag.top + dy));
+      root.style.left = x + 'px';
+      root.style.top = y + 'px';
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      try { root.releasePointerCapture?.(e.pointerId); } catch (_) {}
+    };
+    const up = ev => {
+      if (!panelDrag || ev.pointerId !== panelDrag.pointerId) return;
+      if (panelDrag.moved) {
+        const cfg = buttonSettings();
+        saveButtonSettings({ ...cfg, panelX: parseFloat(root.style.left), panelY: parseFloat(root.style.top) });
+      }
+      cleanup();
+      setTimeout(() => { panelDrag = null; }, 80);
+    };
+    const cancel = ev => {
+      if (!panelDrag || ev.pointerId !== panelDrag.pointerId) return;
+      cleanup();
+      panelDrag = null;
     };
     window.addEventListener('pointermove', move, { passive: false });
     window.addEventListener('pointerup', up, { passive: false });
