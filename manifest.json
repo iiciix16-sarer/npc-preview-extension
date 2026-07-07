@@ -9,6 +9,6 @@
   "author": "Kilo Code",
   "version": "1.0",
   "homePage": "",
-  "auto_update": false,
+  "auto_update": ture,
   "minimum_client_version": "1.0"
 }
