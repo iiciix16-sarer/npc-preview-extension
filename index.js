@@ -739,9 +739,10 @@
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const warn = mode === '数据库模式' && dbMissingColumns.length ? `<div class="npcpv-db-warn">数据库缺列：${esc(dbMissingColumns.join('、'))}。请补齐后 AI 才能实时维护这些字段。</div>` : '';
     
-    const styleAttr = `${panelW ? `width:${panelW}px;` : ''}${panelH ? `height:${panelH}px;` : ''}${panelX != null ? `left:${panelX}px;top:${panelY}px;transform:none;` : ''}`;
+    // 强制加入 transform: none !important 废弃原始 CSS 的捣乱
+    const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     
-    root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header npcpv-drag-handle"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
     
     applyPanelTheme(root);
     bindEvents(root);
@@ -750,7 +751,8 @@
   function bindEvents(root) {
     const selected = rows.find(r => String(r.id) === String(selectedId));
     
-    root.querySelector('.npcpv-drag-handle')?.addEventListener('pointerdown', startPanelDrag);
+    // 【全新功能】：给整个容器绑定拖拽，实现“点击任意位置都可以拖”
+    root.querySelector('.npcpv-root')?.addEventListener('pointerdown', startPanelDrag);
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
@@ -933,17 +935,20 @@
     panelW = cfg.panelW;
     panelH = cfg.panelH;
     
-    // 【修改点1】：打开面板时进行边界自动修正
-    if (panelX != null || panelY != null) {
-      const maxW = window.innerWidth;
-      const maxH = window.innerHeight;
-      const w = panelW || Math.min(860, maxW - 16);
-      
-      // 限制 x 坐标：最左不能越出屏幕超过面板宽度-40px，最右不能超过屏幕宽度-40px
-      if (panelX != null) panelX = Math.max(-w + 40, Math.min(maxW - 40, panelX));
-      // 限制 y 坐标：顶部绝不允许出界 (最顶为0)，底部保留40px
-      if (panelY != null) panelY = Math.max(0, Math.min(maxH - 40, panelY));
+    const maxW = window.innerWidth;
+    const maxH = window.innerHeight;
+    
+    // 如果之前保存的位置明显有问题（比如跑到屏幕外面了），直接重新计算真正的居中
+    if (panelX == null || panelY == null || panelX < -100 || panelY < 0 || panelX > maxW) {
+       const w = panelW || Math.min(860, maxW * 0.92);
+       const h = panelH || Math.min(680, maxH * 0.88);
+       panelX = Math.max(0, (maxW - w) / 2);
+       panelY = Math.max(0, (maxH - h) / 2);
     }
+    
+    // 强制把越界的坐标拉回屏幕内 (保证绝对安全，最上面不能飞出去)
+    panelX = Math.max(0, Math.min(maxW - 60, panelX));
+    panelY = Math.max(0, Math.min(maxH - 60, panelY));
     
     let root = document.getElementById(PANEL_ID);
     if (!root) {
@@ -952,12 +957,12 @@
       document.body.appendChild(root);
     }
     
-    const styleAttr = `${panelW ? `width:${panelW}px;` : ''}${panelH ? `height:${panelH}px;` : ''}${panelX != null ? `left:${panelX}px;top:${panelY}px;transform:none;` : ''}`;
+    // 强制加入 transform: none !important 废弃 CSS
+    const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     
-    root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header npcpv-drag-handle"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
+    root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
     
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
-    root.querySelector('.npcpv-drag-handle')?.addEventListener('pointerdown', startPanelDrag);
     applyPanelTheme(root);
     
     try {
@@ -983,26 +988,23 @@
     document.getElementById(PANEL_ID)?.remove(); 
   }
   
+  // 【关键修改】：全局拖拽控制
   function startPanelDrag(e) {
-    if (e.target.closest('.npcpv-actions') || e.target.closest('button') || e.target.closest('input')) return;
+    // 排除掉所有“输入框”、“按钮”、“下拉菜单”等必须点击交互的地方
+    const tag = e.target.tagName;
+    if (['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(tag)) return;
+    
+    // 排除特定组件的内部误触
+    if (e.target.closest('.npcpv-card, .npcpv-chip, .npcpv-close, [data-action], .npcpv-actions')) return;
     
     const win = document.querySelector('.npcpv-root');
     if (!win) return;
     
-    const rect = win.getBoundingClientRect();
-    const style = window.getComputedStyle(win);
-    
-    if (style.transform && style.transform !== 'none') {
-      win.style.transform = 'none';
-      win.style.left = rect.left + 'px';
-      win.style.top = rect.top + 'px';
-    }
-    
     panelDrag = { 
       startX: e.clientX, 
       startY: e.clientY, 
-      left: parseFloat(win.style.left) || rect.left, 
-      top: parseFloat(win.style.top) || rect.top 
+      left: parseFloat(win.style.left) || 0, 
+      top: parseFloat(win.style.top) || 0 
     };
     win.setPointerCapture?.(e.pointerId);
 
@@ -1014,8 +1016,8 @@
       let newX = panelDrag.left + dx;
       let newY = panelDrag.top + dy;
       
-      // 【修改点2】：拖拽时实时限制边界，禁止向上越界（标题栏永远不会被卡住）
-      newX = Math.max(-win.offsetWidth + 40, Math.min(window.innerWidth - 40, newX));
+      // 拖拽时依旧锁死屏幕边界，绝对不让你拖到顶出去
+      newX = Math.max(0, Math.min(window.innerWidth - 40, newX));
       newY = Math.max(0, Math.min(window.innerHeight - 40, newY)); 
       
       win.style.left = newX + 'px';
