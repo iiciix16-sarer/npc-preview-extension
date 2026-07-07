@@ -328,7 +328,7 @@
        return;
     }
 
-    if(!isSilent) toggleLoading(true, '独立API扫描剧情中...');
+    if(!isSilent) toggleLoading(true, '剧情扫描中,请稍候...');
 
     // 【核心修复】：自动检测并补全 '/chat/completions' 路径
     let targetUrl = cfg.apiUrl.trim();
@@ -356,12 +356,14 @@
           })
        });
        
-       if (!res.ok) {
+      if (!res.ok) {
            const errText = await res.text();
            console.error('[NPC预览表] API 请求失败:', res.status, errText);
-           throw new Error(`HTTP ${res.status}: 请按F12查看控制台报错详情`);
+           // 新增：直接在手机屏幕上弹窗显示 API 接口的详细报错
+           if (!isSilent) alert(`API 请求失败 (HTTP ${res.status})\n\n错误详情:\n${errText.substring(0, 300)}`);
+           throw new Error(`HTTP ${res.status}`);
        }
-       
+
        const json = await res.json();
        const responseText = json.choices?.[0]?.message?.content || '';
        
@@ -369,9 +371,12 @@
        try { 
            const raw = responseText.match(/\[[\s\S]*\]/)?.[0] || responseText;
            list = JSON.parse(raw); 
-       } catch(e) { 
+      } catch(e) { 
            console.error('[NPC预览表] JSON解析失败，大模型返回的原文是:', responseText);
-           if(!isSilent) showToast('AI返回格式有误，请按F12查看控制台'); 
+           if(!isSilent) {
+               // 新增：直接弹窗展示大模型原本吐出来的完整文本，方便你检查到底哪里没对齐格式
+               alert(`AI返回格式有误，解析失败！\n\n大模型实际返回的原文是：\n\n${responseText.substring(0, 600)}`);
+           }
            toggleLoading(false); return; 
        }
        
