@@ -44,6 +44,17 @@
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   resize: both;
+  
+  /* 添加平滑过渡，让亮起和熄灭时有个缓动效果 */
+  transition: border 0.15s ease-out, box-shadow 0.15s ease-out, transform 0.15s ease-out;
+}
+
+/* 【核心新增】：触发长按拖拽时的耀眼视觉反馈 */
+.npcpv-root.npcpv-dragging {
+  border: 3px solid #ff9800 !important; /* 极其醒目的橙色加粗边框 */
+  box-shadow: 0 0 25px rgba(255, 152, 0, 0.45) !important; /* 橙色发光阴影 */
+  opacity: 0.96;
+  user-select: none; /* 拖拽时防止误选文字 */
 }
 
 .npcpv-modal {
@@ -93,7 +104,6 @@
 .npcpv-btn.primary { border-color: var(--npcpv-accent, #43a047); background: var(--npcpv-accent, #43a047); color: #fff; font-weight: 700; }
 .npcpv-btn.danger { border-color: #ffcdd2; color: #d32f2f; }
 
-/* 默认在电脑端隐藏“返回列表”按钮 */
 .npcpv-back-btn { display: none; font-weight: 700; margin-bottom: 14px; }
 
 .npcpv-close {
@@ -176,8 +186,6 @@
   text-align: center;
   cursor: pointer;
 }
-.npcpv-card[draggable="true"] { cursor: grab; }
-.npcpv-card[draggable="true"]:active { cursor: grabbing; }
 
 .npcpv-card:hover,
 .npcpv-card.active { border-color: var(--npcpv-accent, #43a047); background: var(--npcpv-soft, #f1f8f2); }
@@ -256,7 +264,6 @@
 .npcpv-import-row span { overflow-wrap: anywhere; white-space: normal; }
 .npcpv-empty.compact { min-height: 64px; height: auto; }
 
-/* 响应式调整（手机端翻页模式） */
 @media (max-width: 640px) {
   .npcpv-open-button {
     width: 54px;
@@ -279,21 +286,17 @@
   .npcpv-close { position: absolute; top: 8px; right: 10px; }
   .npcpv-db-warn { max-height: 58px; overflow: auto; font-size: 11px; }
   
-  /* 【关键修改】：不再使用 grid 切割屏幕，改为单页灵活排布 */
   .npcpv-body { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }
   
-  /* 将左侧列表和右侧详情统一铺满 */
   .npcpv-list, .npcpv-detail {
     flex: 1 1 100%; 
     width: 100%; 
   }
   .npcpv-list { border-right: none; }
   
-  /* 根据 root 拥有的 class，决定隐藏哪一边 */
   .npcpv-root.view-list .npcpv-detail { display: none !important; }
   .npcpv-root.view-detail .npcpv-list { display: none !important; }
   
-  /* 显示“返回列表”按钮 */
   .npcpv-back-btn { display: inline-block; }
 
   .npcpv-search { margin: 8px; padding: 8px; }

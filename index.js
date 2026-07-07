@@ -730,7 +730,6 @@
     const avatar = avatars()[name];
     const ex = rowExtra(row);
     
-    // 【新功能】加入手机端专用的返回按钮
     const backBtn = `<button class="npcpv-btn npcpv-back-btn" data-action="back-to-list">⬅ 返回NPC列表</button>`;
     
     return `${backBtn}<div class="npcpv-profile"><div class="npcpv-big-avatar" data-action="avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}<span>上传头像</span></div><div class="npcpv-profile-text"><div class="npcpv-main-name">${esc(name)}</div><div class="npcpv-main-sub">${esc(row['势力'] || '未分组')}</div><div class="npcpv-main-sub long">${esc(row['身份'] || '')}</div></div></div><div class="npcpv-section"><div class="npcpv-label">分组 / 势力</div><input class="npcpv-input" data-action="faction" value="${esc(row['势力'] || '')}" placeholder="例如：星耀传媒、黑市、王城"></div><div class="npcpv-section"><div class="npcpv-label">身份介绍</div><textarea class="npcpv-textarea npcpv-identity" data-action="identity" placeholder="例如：星耀传媒旗下影帝 / 体验派演员 / 曾获金...">${esc(row['身份'] || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">首次登场时间 / 章节</div><input class="npcpv-input" data-action="first-seen" value="${esc(ex.firstSeen || '')}" placeholder="例如：第3章 / 初见舞台 / 2026-07-06"></div><div class="npcpv-section"><div class="npcpv-label">首次登场发生了什么</div><textarea class="npcpv-textarea" data-action="first-event" placeholder="记录第一次出现的位置和事件，方便回溯">${esc(ex.firstEvent || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">好感度 <span class="npcpv-small">${mode === '数据库模式' ? '数据库列：好感度' : '变量：' + VAR_PREFIX + keyName(name) + '_好感'}</span></div><div class="npcpv-aff"><div class="npcpv-affbar"><div class="npcpv-afffill" style="width:${Math.min(Math.abs(aff),100)}%;background:${affectionColor(aff)}"></div></div><div class="npcpv-affval" style="color:${affectionColor(aff)}">${aff}</div></div>${trendSvg(ex.history, aff)}<div class="npcpv-ctrls">${[-10,-5,-1,1,5,10].map(n => `<button class="npcpv-btn" data-action="aff" data-delta="${n}">${n > 0 ? '+' : ''}${n}</button>`).join('')}</div></div><div class="npcpv-section"><div class="npcpv-label">NPC关系</div><textarea class="npcpv-textarea" data-action="relations" placeholder="输入相关 NPC 名字，用顿号、逗号或换行分隔">${esc(ex.relations || '')}</textarea>${relationGraphHtml(row)}</div><div class="npcpv-section"><div class="npcpv-label">状态</div><select class="npcpv-select" data-action="status">${STATUSES.map(s => `<option value="${s[0]}" ${s[0] === (row['状态'] || 'offline') ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">心情 <span class="npcpv-small">${mood[2]}</span></div><select class="npcpv-select" data-action="mood">${MOODS.map(m => `<option value="${m[0]}" ${m[0] === (row['心情'] || 'calm') ? 'selected' : ''}>${m[2]} ${m[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">备注</div><textarea class="npcpv-textarea" data-action="notes">${esc(row['备注'] || '')}</textarea></div><div class="npcpv-ctrls"><button class="npcpv-btn danger" data-action="delete">删除NPC</button></div>`;
@@ -745,7 +744,6 @@
     
     const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     
-    // 【新功能】为根容器动态添加 class，决定在手机上显示列表还是详情
     const viewClass = selected ? 'view-detail' : 'view-list';
     
     root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
@@ -757,10 +755,10 @@
   function bindEvents(root) {
     const selected = rows.find(r => String(r.id) === String(selectedId));
     
+    // 【修改点】：全局长按拖拽绑定
     root.querySelector('.npcpv-root')?.addEventListener('pointerdown', startPanelDrag);
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     
-    // 【新功能】绑定返回列表事件
     root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
     
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
@@ -965,7 +963,6 @@
     
     const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     
-    // 【新功能】打开时根据选中状态决定展现的视图
     const viewClass = selectedId ? 'view-detail' : 'view-list';
     
     root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
@@ -996,24 +993,57 @@
     document.getElementById(PANEL_ID)?.remove(); 
   }
   
+  // 【核心修改】：长按 0.3 秒判定与拖拽逻辑
   function startPanelDrag(e) {
     const tag = e.target.tagName;
+    // 豁免输入框等可交互元素，避免影响复制粘贴和正常打字
     if (['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(tag)) return;
     if (e.target.closest('.npcpv-card, .npcpv-chip, .npcpv-close, [data-action], .npcpv-actions')) return;
     
     const win = document.querySelector('.npcpv-root');
     if (!win) return;
+
+    let pressTimer = null;
+    let isDragging = false;
+    const startTouchX = e.clientX;
+    const startTouchY = e.clientY;
     
-    panelDrag = { 
-      startX: e.clientX, 
-      startY: e.clientY, 
-      left: parseFloat(win.style.left) || 0, 
-      top: parseFloat(win.style.top) || 0 
+    // 静默拦截长按时的手机系统菜单
+    const blockContextMenu = ev => { if (isDragging) ev.preventDefault(); };
+    window.addEventListener('contextmenu', blockContextMenu);
+
+    // 开始长按计时
+    const triggerDrag = () => {
+      isDragging = true;
+      // 添加明显视觉反馈的类名
+      win.classList.add('npcpv-dragging');
+      // 如果设备支持，触发轻微震动
+      navigator.vibrate?.(30);
+      
+      panelDrag = { 
+        startX: startTouchX, 
+        startY: startTouchY, 
+        left: parseFloat(win.style.left) || 0, 
+        top: parseFloat(win.style.top) || 0 
+      };
+      win.setPointerCapture?.(e.pointerId);
     };
-    win.setPointerCapture?.(e.pointerId);
+
+    // 设定 300 毫秒的判定时间
+    pressTimer = setTimeout(triggerDrag, 300);
 
     const move = ev => {
-      if (!panelDrag) return;
+      if (!isDragging) {
+        // 如果在 300 毫秒内发生了明显的滑动行为，认定为“滚动列表”，取消拖拽计时
+        if (Math.abs(ev.clientX - startTouchX) > 8 || Math.abs(ev.clientY - startTouchY) > 8) {
+          clearTimeout(pressTimer);
+        }
+        return;
+      }
+      
+      // 成功判定为拖拽后，阻止背景页面的滚动
+      ev.preventDefault();
+
       const dx = ev.clientX - panelDrag.startX;
       const dy = ev.clientY - panelDrag.startY;
       
@@ -1028,17 +1058,26 @@
     };
     
     const up = () => {
-      if (win) {
-         panelX = parseFloat(win.style.left) || null;
-         panelY = parseFloat(win.style.top) || null;
+      clearTimeout(pressTimer);
+      if (isDragging) {
+         // 拖拽结束，移除视觉反馈类名
+         win.classList.remove('npcpv-dragging');
+         if (win) {
+            panelX = parseFloat(win.style.left) || null;
+            panelY = parseFloat(win.style.top) || null;
+         }
+         panelDrag = null;
       }
-      panelDrag = null;
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      // 清除菜单拦截，防止影响后续正常操作
+      setTimeout(() => window.removeEventListener('contextmenu', blockContextMenu), 50);
     };
     
-    window.addEventListener('pointermove', move);
+    window.addEventListener('pointermove', move, { passive: false });
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   }
 
   function ensureButton() {
@@ -1050,7 +1089,6 @@
     btn.title = 'NPC预览表：点击打开，拖动移动位置';
     btn.addEventListener('pointerdown', startButtonDrag);
     
-    // 【新功能】移除冗余点击事件，统一由拖拽逻辑结算时的状态切换，以防点击穿透和冲突
     document.body.appendChild(btn);
     applyButtonSettings();
   }
@@ -1147,7 +1185,6 @@
       } else {
         if (Date.now() - lastButtonOpenAt >= 450) {
           lastButtonOpenAt = Date.now();
-          // 【新功能】加入切换逻辑：如果存在就关掉，不存在就打开
           if (document.getElementById(PANEL_ID)) {
              closePanel();
           } else {
