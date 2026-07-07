@@ -322,11 +322,18 @@
        return;
     }
     
-    if(!isSilent) toggleLoading(true, '独立API扫描剧情中...');
     const chat = getChatTextForAi();
     if (!chat) {
-       if(!isSilent) { toggleLoading(false); showToast('未读取到聊天记录'); }
+       if(!isSilent) showToast('未读取到聊天记录，请确认当前已进入对话界面');
        return;
+    }
+
+    if(!isSilent) toggleLoading(true, '独立API扫描剧情中...');
+
+    // 【核心修复】：自动检测并补全 '/chat/completions' 路径
+    let targetUrl = cfg.apiUrl.trim();
+    if (!targetUrl.endsWith('/chat/completions')) {
+        targetUrl = targetUrl.replace(/\/+$/, '') + '/chat/completions';
     }
 
     const systemPrompt = `你是NPC状态判定器。仅输出纯JSON数组，绝对不要有任何解释或markdown格式。
@@ -335,11 +342,12 @@
 若某NPC未在近期被提及，不要返回。`;
     
     try {
-       const res = await fetch(cfg.apiUrl, {
+       // 这里使用拼接好的 targetUrl 
+       const res = await fetch(targetUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey}` },
           body: JSON.stringify({
-             model: cfg.apiModel,
+             model: cfg.apiModel || 'gpt-3.5-turbo',
              messages: [
                { role: 'system', content: systemPrompt },
                { role: 'user', content: `请提取以下最新对话中出现的NPC状态变化：\n\n${chat}` }
@@ -348,7 +356,12 @@
           })
        });
        
-       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+       if (!res.ok) {
+           const errText = await res.text();
+           console.error('[NPC预览表] API 请求失败:', res.status, errText);
+           throw new Error(`HTTP ${res.status}: 请按F12查看控制台报错详情`);
+       }
+       
        const json = await res.json();
        const responseText = json.choices?.[0]?.message?.content || '';
        
@@ -357,7 +370,8 @@
            const raw = responseText.match(/\[[\s\S]*\]/)?.[0] || responseText;
            list = JSON.parse(raw); 
        } catch(e) { 
-           if(!isSilent) showToast('AI返回解析失败，请检查模型输出'); 
+           console.error('[NPC预览表] JSON解析失败，大模型返回的原文是:', responseText);
+           if(!isSilent) showToast('AI返回格式有误，请按F12查看控制台'); 
            toggleLoading(false); return; 
        }
        
@@ -386,7 +400,8 @@
        if(!isSilent) showToast(`状态刷新成功！更新了 ${count} 位 NPC 变量`);
     } catch(err) {
        toggleLoading(false);
-       if(!isSilent) showToast('独立扫描失败：' + (err.message || '网络错误'));
+       if(!isSilent) showToast('请求失败：' + (err.message || '网络或跨域错误'));
+       console.error('[NPC预览表] 请求抛出异常:', err);
     }
   }
 
