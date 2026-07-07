@@ -467,12 +467,17 @@
     const current = await readDb() || [];
     const found = current.find(r => r['NPC名称'] === item['NPC名称']);
     const payload = dbRowPayload(item);
-    if (found) {
-      const result = await api.updateRow(TABLE_NAME, found.rowIndex, payload);
-      return result !== false && result !== -1 && result != null;
+    try {
+      if (found) {
+        const result = await api.updateRow(TABLE_NAME, found.rowIndex, payload);
+        return result !== false && result !== -1 && result != null;
+      }
+      const ok = await api.insertRow(TABLE_NAME, payload);
+      return ok !== false && ok !== -1 && ok != null;
+    } catch (err) {
+      console.error('[NPC预览表] 写入数据库失败', err);
+      return false;
     }
-    const ok = await api.insertRow(TABLE_NAME, payload);
-    return ok !== false && ok !== -1 && ok != null;
   }
 
   async function syncAiFromChat(e) {
@@ -488,48 +493,70 @@
       }
     };
     try {
-    const api = dbApi();
-    if (!api?.callAI) {
-      showNotice('AI同步需要神数据库提供 AutoCardUpdaterAPI.callAI，并使用数据库插件或主 API 配置模型。');
+      const api = dbApi();
+      if (!api?.callAI) {
+        showNotice('AI同步需要神数据库提供 AutoCardUpdaterAPI.callAI。');
+        return finish();
+      }
+      await loadRows();
+      if (dbMissingColumns.length) {
+        showNotice('NPC预览表缺少列：' + dbMissingColumns.join('、') + '。请先补齐数据库列，否则 AI 写入后也无法实时维护这些字段。');
+        return finish();
+      }
+      const chat = getChatTextForAi();
+      if (!chat) {
+        showNotice('没有读取到聊天记录。');
+        return finish();
+      }
+      const response = await api.callAI([
+        { role: 'system', content: '你是 NPC 数据整理器。只输出 JSON 数组，不要解释。字段必须为：NPC名称, 势力, 身份, 好感度, 状态, 心情, 备注, 首次登场, 登场事件, NPC关系, 好感历史。' },
+        { role: 'user', content: `请从以下已有聊天记录中整理出现过的 NPC，并补全可判断的信息。只输出 JSON 数组：\n\n${chat}` },
+      ], { maxTokens: 4000 });
+      
+      const list = extractJsonArray(response);
+      if (!list.length) {
+        showNotice('AI同步未提取到可写入的NPC数据。');
+        return finish();
+      }
+      
+      let ok = 0;
+      let attempted = 0;
+      
+      for (const item of list) {
+        if (!item?.NPC名称) continue;
+        attempted++;
+        
+        let success = false;
+        if (mode === '数据库模式' && await upsertDbNpc(item)) {
+          success = true;
+        } else {
+          const reg = registry();
+          const existing = reg.find(n => n.name === item['NPC名称']);
+          if (!existing) {
+            reg.push({ id: Date.now() + Math.random(), name: item['NPC名称'], faction: item['势力'] || '', identity: item['身份'] || '' });
+          } else {
+            existing.faction = item['势力'] || existing.faction;
+            existing.identity = item['身份'] || existing.identity;
+          }
+          saveRegistry(reg);
+          
+          const key = keyName(item['NPC名称']);
+          if (item['好感度'] !== undefined) await setVar(VAR_PREFIX + key + '_好感', item['好感度']);
+          if (item['状态']) await setVar(VAR_PREFIX + key + '_状态', item['状态']);
+          if (item['心情']) await setVar(VAR_PREFIX + key + '_心情', item['心情']);
+          if (item['备注']) await setVar(VAR_PREFIX + key + '_备注', item['备注']);
+          success = true;
+        }
+        
+        if (success) ok++;
+        if (attempted % 10 === 0) await sleep(0);
+      }
+      
+      if (api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
+      await loadRows();
+      render();
+      showNotice(`AI同步完成：提取 ${list.length} 条，尝试写入 ${attempted} 条，最终成功 ${ok} 条。`);
       finish();
-      return;
-    }
-    await loadRows();
-    if (dbMissingColumns.length) {
-      showNotice('NPC预览表缺少列：' + dbMissingColumns.join('、') + '。请先补齐数据库列，否则 AI 写入后也无法实时维护这些字段。');
-      finish();
-      return;
-    }
-    const chat = getChatTextForAi();
-    if (!chat) {
-      showNotice('没有读取到聊天记录。可确认 TavernHelper 或神数据库 getStoryContext 是否可用。');
-      finish();
-      return;
-    }
-    console.log('[NPC预览表] AI同步开始，聊天文本长度:', chat.length);
-    const response = await api.callAI([
-      { role: 'system', content: '你是 NPC 数据整理器。只输出 JSON 数组，不要解释。字段必须为：NPC名称, 势力, 身份, 好感度, 状态, 心情, 备注, 首次登场, 登场事件, NPC关系, 好感历史。好感历史输出 JSON 字符串数组或 []。如果未知就留空或 0。' },
-      { role: 'user', content: `请从以下已有聊天记录中整理出现过的 NPC，并补全可判断的信息。只输出 JSON 数组：\n\n${chat}` },
-    ], { maxTokens: 4000 });
-    const list = extractJsonArray(response);
-    if (!list.length) {
-      showNotice('AI同步收到模型返回，但没有找到可写入的 NPC 数据。请检查模型返回是否包含 NPC名称/name/名字 字段。返回开头：' + String(response || '').slice(0, 240));
-      finish();
-      return;
-    }
-    let ok = 0;
-    let attempted = 0;
-    for (const item of list) {
-      if (!item?.NPC名称) continue;
-      attempted++;
-      if (await upsertDbNpc(item)) ok++;
-      if (attempted % 10 === 0) await sleep(0);
-    }
-    if (api.refreshDataAndWorldbook) await api.refreshDataAndWorldbook();
-    await loadRows();
-    render();
-    showNotice(`AI同步完成：模型识别 ${list.length} 条，尝试写入 ${attempted} 条，确认成功 ${ok} 条。若确认成功为 0，请检查 NPC预览表 是否存在且列名完全匹配。`);
-    finish();
     } catch (err) {
       console.error('[NPC预览表] AI同步失败', err);
       showNotice('AI同步失败：' + (err?.message || String(err || '未知错误')));
@@ -537,42 +564,77 @@
     }
   }
 
-  function bindLiveUpdates() {
-    const api = dbApi();
-    if (liveUpdateBound || !api?.registerTableUpdateCallback) return;
-    liveUpdateBound = true;
-    api.registerTableUpdateCallback(async () => {
-      if (!document.getElementById(PANEL_ID)) return;
-      await loadRows();
-      render();
-    });
-  }
-
-  function bindSettingsEntry() {
-    settingsEntryBound = true;
-    document.getElementById('npcpv-settings-entry')?.remove();
-  }
-
   async function readDb() {
     const api = dbApi();
-    if (!api?.exportTableAsJson) return null;
+    if (!api) return null;
+    
     try {
-      const raw = api.exportTableAsJson(TABLE_NAME);
+      let raw = null;
+      if (api.exportTableAsJson) {
+        raw = api.exportTableAsJson(TABLE_NAME) || api.exportTableAsJson('sheet_npc_preview');
+      }
+      if (!raw && api.getTable) {
+        const tbl = api.getTable(TABLE_NAME) || api.getTable('sheet_npc_preview');
+        if (tbl) raw = tbl;
+      }
+      
       if (!raw) return null;
+      
       const table = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      if (!table?.content || !Array.isArray(table.content) || table.content.length < 2) return null;
-      const headers = table.content[0];
-      if (!headers.includes('NPC名称') || !headers.includes('好感度')) return null;
-      dbMissingColumns = REQUIRED_COLUMNS.filter(col => !headers.includes(col));
-      return table.content.slice(1).map((row, index) => {
-        const item = { id: 'db_' + (index + 1), rowIndex: index + 1, source: 'db' };
-        headers.forEach((h, i) => { item[h] = row[i] == null ? '' : row[i]; });
-        Object.assign(item, rowExtra(item));
-        return item;
-      });
-    } catch (_) { dbMissingColumns = []; return null; }
+      
+      if (Array.isArray(table) && table.length > 0 && table[0] && typeof table[0] === 'object' && ('NPC名称' in table[0])) {
+         dbMissingColumns = REQUIRED_COLUMNS.filter(col => !(col in table[0]));
+         return table.map((row, index) => {
+           const item = { id: 'db_' + (row.row_id || index + 1), rowIndex: row.row_id || index + 1, source: 'db' };
+           Object.assign(item, row);
+           Object.assign(item, rowExtra(item));
+           return item;
+         });
+      }
+      
+      if (table?.content && Array.isArray(table.content)) {
+          if (table.content.length < 2) return []; 
+          const headers = table.content[0];
+          dbMissingColumns = REQUIRED_COLUMNS.filter(col => !headers.includes(col));
+          return table.content.slice(1).map((row, index) => {
+            const item = { id: 'db_' + (index + 1), rowIndex: index + 1, source: 'db' };
+            headers.forEach((h, i) => { item[h] = row[i] == null ? '' : row[i]; });
+            Object.assign(item, rowExtra(item));
+            return item;
+          });
+      }
+      
+      if (Array.isArray(table) && Array.isArray(table[0])) {
+          if (table.length < 2) return []; 
+          const headers = table[0];
+          dbMissingColumns = REQUIRED_COLUMNS.filter(col => !headers.includes(col));
+          return table.slice(1).map((row, index) => {
+            const item = { id: 'db_' + (index + 1), rowIndex: index + 1, source: 'db' };
+            headers.forEach((h, i) => { item[h] = row[i] == null ? '' : row[i]; });
+            Object.assign(item, rowExtra(item));
+            return item;
+          });
+      }
+      
+      return []; 
+    } catch (err) { 
+      console.error('[NPC预览表] 读取数据库表失败', err);
+      dbMissingColumns = []; 
+      return null;
+    }
   }
 
+  async function loadRows() {
+    const dbRows = await readDb();
+    if (dbRows !== null) {
+      mode = '数据库模式';
+      rows = dbRows;
+    } else {
+      mode = '变量模式';
+      rows = await readVars();
+    }
+  }
+  
   async function readVars() {
     const result = [];
     for (const npc of registry()) {
@@ -593,17 +655,6 @@
       result.push(item);
     }
     return result;
-  }
-
-  async function loadRows() {
-    const dbRows = await readDb();
-    if (dbRows && dbRows.length) {
-      mode = '数据库模式';
-      rows = dbRows;
-    } else {
-      mode = '变量模式';
-      rows = await readVars();
-    }
   }
 
   async function writeField(row, field, value) {
@@ -755,7 +806,6 @@
   function bindEvents(root) {
     const selected = rows.find(r => String(r.id) === String(selectedId));
     
-    // 【修改点】：全局长按拖拽绑定
     root.querySelector('.npcpv-root')?.addEventListener('pointerdown', startPanelDrag);
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     
@@ -993,10 +1043,8 @@
     document.getElementById(PANEL_ID)?.remove(); 
   }
   
-  // 【核心修改】：长按 0.3 秒判定与拖拽逻辑
   function startPanelDrag(e) {
     const tag = e.target.tagName;
-    // 豁免输入框等可交互元素，避免影响复制粘贴和正常打字
     if (['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(tag)) return;
     if (e.target.closest('.npcpv-card, .npcpv-chip, .npcpv-close, [data-action], .npcpv-actions')) return;
     
@@ -1008,16 +1056,12 @@
     const startTouchX = e.clientX;
     const startTouchY = e.clientY;
     
-    // 静默拦截长按时的手机系统菜单
     const blockContextMenu = ev => { if (isDragging) ev.preventDefault(); };
     window.addEventListener('contextmenu', blockContextMenu);
 
-    // 开始长按计时
     const triggerDrag = () => {
       isDragging = true;
-      // 添加明显视觉反馈的类名
       win.classList.add('npcpv-dragging');
-      // 如果设备支持，触发轻微震动
       navigator.vibrate?.(30);
       
       panelDrag = { 
@@ -1029,21 +1073,17 @@
       win.setPointerCapture?.(e.pointerId);
     };
 
-    // 设定 300 毫秒的判定时间
     pressTimer = setTimeout(triggerDrag, 300);
 
     const move = ev => {
       if (!isDragging) {
-        // 如果在 300 毫秒内发生了明显的滑动行为，认定为“滚动列表”，取消拖拽计时
         if (Math.abs(ev.clientX - startTouchX) > 8 || Math.abs(ev.clientY - startTouchY) > 8) {
           clearTimeout(pressTimer);
         }
         return;
       }
       
-      // 成功判定为拖拽后，阻止背景页面的滚动
       ev.preventDefault();
-
       const dx = ev.clientX - panelDrag.startX;
       const dy = ev.clientY - panelDrag.startY;
       
@@ -1060,7 +1100,6 @@
     const up = () => {
       clearTimeout(pressTimer);
       if (isDragging) {
-         // 拖拽结束，移除视觉反馈类名
          win.classList.remove('npcpv-dragging');
          if (win) {
             panelX = parseFloat(win.style.left) || null;
@@ -1071,13 +1110,28 @@
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
-      // 清除菜单拦截，防止影响后续正常操作
       setTimeout(() => window.removeEventListener('contextmenu', blockContextMenu), 50);
     };
     
     window.addEventListener('pointermove', move, { passive: false });
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
+  }
+
+  function bindLiveUpdates() {
+    const api = dbApi();
+    if (liveUpdateBound || !api?.registerTableUpdateCallback) return;
+    liveUpdateBound = true;
+    api.registerTableUpdateCallback(async () => {
+      if (!document.getElementById(PANEL_ID)) return;
+      await loadRows();
+      render();
+    });
+  }
+
+  function bindSettingsEntry() {
+    settingsEntryBound = true;
+    document.getElementById('npcpv-settings-entry')?.remove();
   }
 
   function ensureButton() {
