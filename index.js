@@ -651,8 +651,8 @@
   function lookupWorldbookInfo(npcName) {
     let result = { faction: '', identity: '' };
     try {
-      if (!window.world_info || !window.world_info.entries) return result;
-      const entries = Object.values(window.world_info.entries);
+      if (!window.worldInfo || !window.worldInfo.entries) return result;
+      const entries = Object.values(window.worldInfo.entries);
       for (const entry of entries) {
         const keys = Array.isArray(entry.key) ? entry.key : String(entry.key || '').split(',');
         if (keys.some(k => k.trim() === npcName)) {
