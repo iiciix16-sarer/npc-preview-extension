@@ -188,11 +188,9 @@
     list: function() { return registry().map(r => r.name); }
   };
 
-  // 【修复 1】：使用轮询机制挂载自动同步，防止由于页面加载过快导致找不到 eventSource
   function bindAutoSync() {
     if (window._npcpv_event_bound) return;
     
-    // 检查酒馆的核心事件总线是否已经准备就绪
     if (window.eventSource && typeof window.eventSource.on === 'function') {
         window.eventSource.on('chat_completion', () => {
             const cfg = buttonSettings();
@@ -201,14 +199,14 @@
                 chatCompletionCount++;
                 if (chatCompletionCount >= interval) {
                     chatCompletionCount = 0;
-                    doAISync(true);
+                    showToast('🔄 达到设定轮次，触发后台自动同步...');
+                    doAISync(false);
                 }
             }
         });
         window._npcpv_event_bound = true;
         console.log('[NPC预览表] 剧情监听器成功挂载！');
     } else {
-        // 如果酒馆还没加载好，1秒后重新尝试挂载
         setTimeout(bindAutoSync, 1000);
     }
   }
@@ -254,11 +252,11 @@
   }
 
   function affectionColor(aff) {
-    if (aff > 50) return '#e91e63'; // 高好感 粉红
-    if (aff > 0) return '#4caf50';  // 正好感 绿色
-    if (aff < -50) return '#d32f2f';// 极低好感 深红
-    if (aff < 0) return '#ff9800';  // 负好感 橙色
-    return '#9e9e9e'; // 0
+    if (aff > 50) return '#e91e63';
+    if (aff > 0) return '#4caf50'; 
+    if (aff < -50) return '#d32f2f';
+    if (aff < 0) return '#ff9800'; 
+    return '#9e9e9e'; 
   }
 
   function statusOf(st) {
@@ -310,10 +308,8 @@
     return `<svg class="npcpv-graph" viewBox="0 0 260 170" style="background:#fbfdfb;border:1px solid #e3f2fd;border-radius:8px;margin-top:8px;width:100%;height:170px;">${lines}${circles}${centerCircle}</svg>`;
   }
 
-  // 【修复 2】：重写聊天记录读取逻辑，做足兜底防御，解决卡死不弹窗的问题
   function getChatTextForAi() {
     try {
-      // 方案 A：针对新版及目前通用酒馆的 TavernHelper 方法
       if (window.TavernHelper && typeof window.TavernHelper.getChatMessages === 'function') {
         const lastId = (typeof window.TavernHelper.getLastMessageId === 'function') 
             ? window.TavernHelper.getLastMessageId() 
@@ -324,7 +320,6 @@
         }
       }
       
-      // 方案 B：针对旧版/变种版 context API 获取方法
       let ctx = null;
       if (window.SillyTavern && typeof window.SillyTavern.getContext === 'function') {
           ctx = window.SillyTavern.getContext();
@@ -336,7 +331,6 @@
           return ctx.chat.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
       }
 
-      // 方案 C：暴力读取最底层的全局 window.chat 数组
       if (Array.isArray(window.chat) && window.chat.length > 0) {
           return window.chat.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
       }
@@ -344,7 +338,6 @@
     } catch (err) { 
         console.warn('[NPC预览表] 提取聊天记录引发异常，已被拦截:', err); 
     }
-    // 所有方案失败时安全返回空字符串，防崩溃
     return '';
   }
 
@@ -356,7 +349,6 @@
     }
     
     const chat = getChatTextForAi();
-    // 拦截空数据，并抛出正确的用户提示
     if (!chat || chat.trim() === '') {
        if(!isSilent) showToast('未能读取到最近的聊天记录，请确认当前已进入对话界面');
        return;
@@ -612,7 +604,6 @@
       card.addEventListener('drop', e => { e.preventDefault(); reorderNpc(e.dataTransfer.getData('text/plain'), card.dataset.id); });
     });
     
-    // Wiki式穿透点击跳转
     root.querySelectorAll('.npcpv-node.clickable').forEach(node => {
       node.addEventListener('click', () => {
          const tName = node.getAttribute('data-npc');
@@ -907,7 +898,6 @@
 
   function updateViewportVars() { document.documentElement.style.setProperty('--npcpv-vw', window.innerWidth+'px'); document.documentElement.style.setProperty('--npcpv-vh', window.innerHeight+'px'); }
 
-  // 【修复 1】：将挂载机制放入初始循环，并在启动时调用
   function boot() {
     updateViewportVars(); ensureButton(); keepButtonVisible(); loadRowsSync();
     if(!window._npcpv_obs) {
