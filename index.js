@@ -188,18 +188,11 @@
     list: function() { return registry().map(r => r.name); }
   };
 
-  if (window.eventSource && !window._npcpv_event_bound) {
+ if (window.eventSource && !window._npcpv_event_bound) {
       window._npcpv_event_bound = true;
       window.eventSource.on('chat_completion', () => {
-          const cfg = buttonSettings();
-          const interval = Number(cfg.autoSyncInterval) || 0;
-          if (interval > 0) {
-              chatCompletionCount++;
-              if (chatCompletionCount >= interval) {
-                  chatCompletionCount = 0;
-                  doAISync(true);
-              }
-          }
+          // 只要聊天回复完成，立刻在后台静默执行一次同步
+          doAISync(false); 
       });
   }
 
