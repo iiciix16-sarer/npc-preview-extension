@@ -4,14 +4,14 @@
   // --- 样式自动注入 ---
   const style = document.createElement('style');
   style.innerHTML = `
-    .npcpv-root { position: fixed !important; z-index: 999999 !important; }
-    .npcpv-open-button { position: fixed !important; z-index: 999999 !important; }
+    .npcpv-root { position: fixed !important; z-index: 2147483647 !important; }
+    .npcpv-open-button { position: fixed !important; z-index: 2147483647 !important; }
     .npcpv-loading-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.6); backdrop-filter: blur(4px); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s; opacity: 0; pointer-events: none; border-radius: 14px; }
     .npcpv-loading-overlay.active { opacity: 1; pointer-events: auto; }
     .npcpv-spinner { width: 36px; height: 36px; border: 4px solid var(--npcpv-accent); border-top-color: transparent; border-radius: 50%; animation: npcpv-spin 1s linear infinite; }
     @keyframes npcpv-spin { to { transform: rotate(360deg); } }
     .npcpv-loading-text { margin-top: 12px; font-size: 13px; font-weight: bold; color: var(--npcpv-accent); }
-    .npcpv-toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px); background: #323232; color: #fff; padding: 10px 24px; border-radius: 24px; font-size: 13px; font-weight: 500; opacity: 0; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 999999; pointer-events: none; box-shadow: 0 4px 16px rgba(0,0,0,0.2); text-align: center; }
+    .npcpv-toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px); background: #323232; color: #fff; padding: 10px 24px; border-radius: 24px; font-size: 13px; font-weight: 500; opacity: 0; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 2147483647; pointer-events: none; box-shadow: 0 4px 16px rgba(0,0,0,0.2); text-align: center; }
     .npcpv-toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
     
     .npcpv-node.clickable { cursor: pointer; transition: transform 0.2s; }
@@ -243,6 +243,20 @@
      return links;
   }
 
+  // 计算好感度颜色的辅助函数 (原代码中似乎漏了这个定义，我补充一个简单的渐变器防止报错)
+  function affectionColor(aff) {
+    if (aff > 50) return '#e91e63'; // 高好感 粉红
+    if (aff > 0) return '#4caf50';  // 正好感 绿色
+    if (aff < -50) return '#d32f2f';// 极低好感 深红
+    if (aff < 0) return '#ff9800';  // 负好感 橙色
+    return '#9e9e9e'; // 0
+  }
+
+  function statusOf(st) {
+    const found = STATUSES.find(s => s[0] === st);
+    return found || STATUSES[0];
+  }
+
   function relationGraphHtml(selected) {
     const names = registry().map(r => r.name);
     const relText = getVarSync(VAR_PREFIX + keyName(selected['NPC名称']) + '_关系', '');
@@ -315,7 +329,6 @@
        return;
     }
 
-    // 更新AI指令：加入了中英双格式说明和关系的强制格式要求
     const systemPrompt = `你是NPC状态判定器。仅输出纯JSON数组，绝对不要有任何解释或markdown格式。
 数组对象允许使用中文或对应英文键名：NPC名称(name), 势力(faction), 身份(identity), 好感度(affection, 必须是数字), 状态(status: online/offline/away/danger/missing), 心情(mood: calm/happy/angry/sad/love/fear/excited/shy/guilty/cold), 备注(notes), 首次登场(first_seen), 登场事件(first_event), NPC关系(relations)。
 【极其重要】：NPC关系(relations) 字段必须严格使用"名字(关系标签)"格式，并用顿号或逗号分隔。例如："李四(挚友)、王五(宿敌)"。
@@ -352,7 +365,6 @@
        
        let count = 0;
        for (const item of list) {
-          // 强化容错：中英双解
           const npcName = item['NPC名称'] || item['name'] || item['npc_name'];
           if (!npcName) continue;
 
@@ -823,9 +835,11 @@
          panelX = parseFloat(win.style.left)||null; panelY = parseFloat(win.style.top)||null;
          panelDrag = null;
       }
-      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointermove', move, { capture: true }); 
+      window.removeEventListener('pointerup', up, { capture: true });
     };
-    window.addEventListener('pointermove', move, { passive: false }); window.addEventListener('pointerup', up);
+    window.addEventListener('pointermove', move, { capture: true, passive: false }); 
+    window.addEventListener('pointerup', up, { capture: true });
   }
 
   function ensureButton() {
@@ -887,9 +901,11 @@
           }
       }
       setTimeout(() => { buttonDrag = null; }, 0);
-      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointermove', move, { capture: true }); 
+      window.removeEventListener('pointerup', up, { capture: true });
     };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    window.addEventListener('pointermove', move, { capture: true, passive: false }); 
+    window.addEventListener('pointerup', up, { capture: true });
   }
 
   function openPanel() {
