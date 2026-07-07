@@ -26,13 +26,11 @@
 .npcpv-open-button:hover { filter: brightness(.92); }
 .npcpv-open-button:active { cursor: grabbing; transform: scale(.98); }
 
-/* 修改：移除了 .npcpv-mask，新增 .npcpv-root 悬浮容器，允许调整尺寸 (resize) */
 .npcpv-root {
   position: fixed;
   z-index: 30000;
   left: 50%;
   top: 50%;
-  transform: translate(-50%, -50%);
   width: 860px;
   max-width: 100vw;
   height: 680px;
@@ -45,10 +43,9 @@
   background: var(--npcpv-panel, #fff);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  resize: both; /* 允许通过右下角原生调整尺寸 */
+  resize: both;
 }
 
-/* 修改：模态框占满 root 容器 */
 .npcpv-modal {
   width: 100%;
   height: 100%;
@@ -56,14 +53,6 @@
   flex-direction: column;
   background: transparent;
   color: var(--npcpv-text, #233323);
-}
-
-/* 新增：标题栏拖拽指针样式 */
-.npcpv-drag-handle {
-  cursor: grab;
-}
-.npcpv-drag-handle:active {
-  cursor: grabbing;
 }
 
 .npcpv-header {
@@ -88,8 +77,7 @@
 }
 
 .npcpv-mode { color: #799079; font-size: 12px; font-weight: 500; }
-.npcpv-actions { display: flex; align-items: center; gap: 8px; }
-.npcpv-actions { flex-wrap: wrap; justify-content: flex-end; }
+.npcpv-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 .npcpv-btn {
   border: 1px solid #cfe5d0;
@@ -104,6 +92,9 @@
 .npcpv-btn:hover { border-color: var(--npcpv-accent, #43a047); background: var(--npcpv-soft, #e8f5e9); }
 .npcpv-btn.primary { border-color: var(--npcpv-accent, #43a047); background: var(--npcpv-accent, #43a047); color: #fff; font-weight: 700; }
 .npcpv-btn.danger { border-color: #ffcdd2; color: #d32f2f; }
+
+/* 默认在电脑端隐藏“返回列表”按钮 */
+.npcpv-back-btn { display: none; font-weight: 700; margin-bottom: 14px; }
 
 .npcpv-close {
   border: 0;
@@ -253,8 +244,6 @@
 .npcpv-identity { min-height: 112px; line-height: 1.6; }
 .npcpv-import-input { min-height: 140px; }
 .npcpv-form { display: grid; gap: 10px; }
-
-/* 修改：子级弹窗相对于 root 定位，z-index 提高 */
 .npcpv-modal-sub { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0,0,0,.25); z-index: 30001; }
 .npcpv-dialog { width: min(560px, 100%); max-height: min(760px, 90vh); overflow: auto; border: 1px solid #dcebdc; border-radius: 12px; padding: 16px; background: #fff; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
 .npcpv-dialog h3 { margin: 0 0 12px; color: var(--npcpv-accent, #2e7d32); font-size: 16px; }
@@ -267,6 +256,7 @@
 .npcpv-import-row span { overflow-wrap: anywhere; white-space: normal; }
 .npcpv-empty.compact { min-height: 64px; height: auto; }
 
+/* 响应式调整（手机端翻页模式） */
 @media (max-width: 640px) {
   .npcpv-open-button {
     width: 54px;
@@ -277,7 +267,6 @@
     box-shadow: 0 8px 28px rgba(0,0,0,.34);
   }
   
-  /* 修改：移动端移除全屏强制铺满，允许通过响应式适应窗口 */
   .npcpv-root {
     max-width: calc(100vw - 16px);
     max-height: calc(100vh - 16px);
@@ -289,8 +278,24 @@
   .npcpv-btn { flex: 0 0 auto; padding: 7px 9px; font-size: 12px; }
   .npcpv-close { position: absolute; top: 8px; right: 10px; }
   .npcpv-db-warn { max-height: 58px; overflow: auto; font-size: 11px; }
-  .npcpv-body { flex: 1 1 auto; min-height: 0; height: auto; display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(150px, 34%) minmax(0, 1fr); overflow: hidden; }
-  .npcpv-list { min-height: 0; border-right: 0; border-bottom: 1px solid #e5efe5; }
+  
+  /* 【关键修改】：不再使用 grid 切割屏幕，改为单页灵活排布 */
+  .npcpv-body { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }
+  
+  /* 将左侧列表和右侧详情统一铺满 */
+  .npcpv-list, .npcpv-detail {
+    flex: 1 1 100%; 
+    width: 100%; 
+  }
+  .npcpv-list { border-right: none; }
+  
+  /* 根据 root 拥有的 class，决定隐藏哪一边 */
+  .npcpv-root.view-list .npcpv-detail { display: none !important; }
+  .npcpv-root.view-detail .npcpv-list { display: none !important; }
+  
+  /* 显示“返回列表”按钮 */
+  .npcpv-back-btn { display: inline-block; }
+
   .npcpv-search { margin: 8px; padding: 8px; }
   .npcpv-filters { max-height: 42px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: 0 8px 8px; }
   .npcpv-chip { flex: 0 0 auto; }
@@ -298,22 +303,12 @@
   .npcpv-group-cards { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
   .npcpv-card { min-height: 92px; padding: 7px 4px; }
   .npcpv-avatar { width: 40px; height: 40px; }
-  .npcpv-detail { min-height: 0; max-height: none; overflow: auto; border-top: 0; padding: 12px 12px calc(18px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
+  
+  .npcpv-detail { padding: 12px 12px calc(18px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
   .npcpv-profile { align-items: flex-start; gap: 10px; }
   .npcpv-big-avatar { width: 62px; height: 62px; font-size: 22px; }
   .npcpv-modal-sub { align-items: stretch; padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom)); }
   .npcpv-dialog { width: calc(var(--npcpv-vw, 100vw) - 20px); max-height: calc(var(--npcpv-vh, 100vh) - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); padding: 12px; }
   .npcpv-dialog-actions { flex-wrap: wrap; }
   .npcpv-import-row { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 430px) and (orientation: portrait) {
-  .npcpv-body { grid-template-rows: minmax(128px, 30%) minmax(0, 1fr); }
-  .npcpv-cards { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); }
-  .npcpv-group-cards { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); }
-  .npcpv-card { min-height: 84px; }
-  .npcpv-avatar { width: 34px; height: 34px; }
-  .npcpv-name { font-size: 11px; }
-  .npcpv-faction { font-size: 9px; }
-  .npcpv-section { margin: 10px 0; }
 }

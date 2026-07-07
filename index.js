@@ -729,7 +729,11 @@
     const mood = moodOf(row['心情']);
     const avatar = avatars()[name];
     const ex = rowExtra(row);
-    return `<div class="npcpv-profile"><div class="npcpv-big-avatar" data-action="avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}<span>上传头像</span></div><div class="npcpv-profile-text"><div class="npcpv-main-name">${esc(name)}</div><div class="npcpv-main-sub">${esc(row['势力'] || '未分组')}</div><div class="npcpv-main-sub long">${esc(row['身份'] || '')}</div></div></div><div class="npcpv-section"><div class="npcpv-label">分组 / 势力</div><input class="npcpv-input" data-action="faction" value="${esc(row['势力'] || '')}" placeholder="例如：星耀传媒、黑市、王城"></div><div class="npcpv-section"><div class="npcpv-label">身份介绍</div><textarea class="npcpv-textarea npcpv-identity" data-action="identity" placeholder="例如：星耀传媒旗下影帝 / 体验派演员 / 曾获金...">${esc(row['身份'] || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">首次登场时间 / 章节</div><input class="npcpv-input" data-action="first-seen" value="${esc(ex.firstSeen || '')}" placeholder="例如：第3章 / 初见舞台 / 2026-07-06"></div><div class="npcpv-section"><div class="npcpv-label">首次登场发生了什么</div><textarea class="npcpv-textarea" data-action="first-event" placeholder="记录第一次出现的位置和事件，方便回溯">${esc(ex.firstEvent || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">好感度 <span class="npcpv-small">${mode === '数据库模式' ? '数据库列：好感度' : '变量：' + VAR_PREFIX + keyName(name) + '_好感'}</span></div><div class="npcpv-aff"><div class="npcpv-affbar"><div class="npcpv-afffill" style="width:${Math.min(Math.abs(aff),100)}%;background:${affectionColor(aff)}"></div></div><div class="npcpv-affval" style="color:${affectionColor(aff)}">${aff}</div></div>${trendSvg(ex.history, aff)}<div class="npcpv-ctrls">${[-10,-5,-1,1,5,10].map(n => `<button class="npcpv-btn" data-action="aff" data-delta="${n}">${n > 0 ? '+' : ''}${n}</button>`).join('')}</div></div><div class="npcpv-section"><div class="npcpv-label">NPC关系</div><textarea class="npcpv-textarea" data-action="relations" placeholder="输入相关 NPC 名字，用顿号、逗号或换行分隔">${esc(ex.relations || '')}</textarea>${relationGraphHtml(row)}</div><div class="npcpv-section"><div class="npcpv-label">状态</div><select class="npcpv-select" data-action="status">${STATUSES.map(s => `<option value="${s[0]}" ${s[0] === (row['状态'] || 'offline') ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">心情 <span class="npcpv-small">${mood[2]}</span></div><select class="npcpv-select" data-action="mood">${MOODS.map(m => `<option value="${m[0]}" ${m[0] === (row['心情'] || 'calm') ? 'selected' : ''}>${m[2]} ${m[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">备注</div><textarea class="npcpv-textarea" data-action="notes">${esc(row['备注'] || '')}</textarea></div><div class="npcpv-ctrls"><button class="npcpv-btn danger" data-action="delete">删除NPC</button></div>`;
+    
+    // 【新功能】加入手机端专用的返回按钮
+    const backBtn = `<button class="npcpv-btn npcpv-back-btn" data-action="back-to-list">⬅ 返回NPC列表</button>`;
+    
+    return `${backBtn}<div class="npcpv-profile"><div class="npcpv-big-avatar" data-action="avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}<span>上传头像</span></div><div class="npcpv-profile-text"><div class="npcpv-main-name">${esc(name)}</div><div class="npcpv-main-sub">${esc(row['势力'] || '未分组')}</div><div class="npcpv-main-sub long">${esc(row['身份'] || '')}</div></div></div><div class="npcpv-section"><div class="npcpv-label">分组 / 势力</div><input class="npcpv-input" data-action="faction" value="${esc(row['势力'] || '')}" placeholder="例如：星耀传媒、黑市、王城"></div><div class="npcpv-section"><div class="npcpv-label">身份介绍</div><textarea class="npcpv-textarea npcpv-identity" data-action="identity" placeholder="例如：星耀传媒旗下影帝 / 体验派演员 / 曾获金...">${esc(row['身份'] || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">首次登场时间 / 章节</div><input class="npcpv-input" data-action="first-seen" value="${esc(ex.firstSeen || '')}" placeholder="例如：第3章 / 初见舞台 / 2026-07-06"></div><div class="npcpv-section"><div class="npcpv-label">首次登场发生了什么</div><textarea class="npcpv-textarea" data-action="first-event" placeholder="记录第一次出现的位置和事件，方便回溯">${esc(ex.firstEvent || '')}</textarea></div><div class="npcpv-section"><div class="npcpv-label">好感度 <span class="npcpv-small">${mode === '数据库模式' ? '数据库列：好感度' : '变量：' + VAR_PREFIX + keyName(name) + '_好感'}</span></div><div class="npcpv-aff"><div class="npcpv-affbar"><div class="npcpv-afffill" style="width:${Math.min(Math.abs(aff),100)}%;background:${affectionColor(aff)}"></div></div><div class="npcpv-affval" style="color:${affectionColor(aff)}">${aff}</div></div>${trendSvg(ex.history, aff)}<div class="npcpv-ctrls">${[-10,-5,-1,1,5,10].map(n => `<button class="npcpv-btn" data-action="aff" data-delta="${n}">${n > 0 ? '+' : ''}${n}</button>`).join('')}</div></div><div class="npcpv-section"><div class="npcpv-label">NPC关系</div><textarea class="npcpv-textarea" data-action="relations" placeholder="输入相关 NPC 名字，用顿号、逗号或换行分隔">${esc(ex.relations || '')}</textarea>${relationGraphHtml(row)}</div><div class="npcpv-section"><div class="npcpv-label">状态</div><select class="npcpv-select" data-action="status">${STATUSES.map(s => `<option value="${s[0]}" ${s[0] === (row['状态'] || 'offline') ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">心情 <span class="npcpv-small">${mood[2]}</span></div><select class="npcpv-select" data-action="mood">${MOODS.map(m => `<option value="${m[0]}" ${m[0] === (row['心情'] || 'calm') ? 'selected' : ''}>${m[2]} ${m[1]}</option>`).join('')}</select></div><div class="npcpv-section"><div class="npcpv-label">备注</div><textarea class="npcpv-textarea" data-action="notes">${esc(row['备注'] || '')}</textarea></div><div class="npcpv-ctrls"><button class="npcpv-btn danger" data-action="delete">删除NPC</button></div>`;
   }
 
   function render() {
@@ -739,10 +743,12 @@
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const warn = mode === '数据库模式' && dbMissingColumns.length ? `<div class="npcpv-db-warn">数据库缺列：${esc(dbMissingColumns.join('、'))}。请补齐后 AI 才能实时维护这些字段。</div>` : '';
     
-    // 强制加入 transform: none !important 废弃原始 CSS 的捣乱
     const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     
-    root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    // 【新功能】为根容器动态添加 class，决定在手机上显示列表还是详情
+    const viewClass = selected ? 'view-detail' : 'view-list';
+    
+    root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
     
     applyPanelTheme(root);
     bindEvents(root);
@@ -751,9 +757,11 @@
   function bindEvents(root) {
     const selected = rows.find(r => String(r.id) === String(selectedId));
     
-    // 【全新功能】：给整个容器绑定拖拽，实现“点击任意位置都可以拖”
     root.querySelector('.npcpv-root')?.addEventListener('pointerdown', startPanelDrag);
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
+    
+    // 【新功能】绑定返回列表事件
+    root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
     
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
     root.querySelector('[data-action="ai-sync"]')?.addEventListener('click', syncAiFromChat);
@@ -938,7 +946,6 @@
     const maxW = window.innerWidth;
     const maxH = window.innerHeight;
     
-    // 如果之前保存的位置明显有问题（比如跑到屏幕外面了），直接重新计算真正的居中
     if (panelX == null || panelY == null || panelX < -100 || panelY < 0 || panelX > maxW) {
        const w = panelW || Math.min(860, maxW * 0.92);
        const h = panelH || Math.min(680, maxH * 0.88);
@@ -946,7 +953,6 @@
        panelY = Math.max(0, (maxH - h) / 2);
     }
     
-    // 强制把越界的坐标拉回屏幕内 (保证绝对安全，最上面不能飞出去)
     panelX = Math.max(0, Math.min(maxW - 60, panelX));
     panelY = Math.max(0, Math.min(maxH - 60, panelY));
     
@@ -957,10 +963,12 @@
       document.body.appendChild(root);
     }
     
-    // 强制加入 transform: none !important 废弃 CSS
     const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     
-    root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
+    // 【新功能】打开时根据选中状态决定展现的视图
+    const viewClass = selectedId ? 'view-detail' : 'view-list';
+    
+    root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">加载中</span></div><div class="npcpv-actions"><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-empty">正在读取 NPC 数据...</div></div></div>`;
     
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     applyPanelTheme(root);
@@ -988,13 +996,9 @@
     document.getElementById(PANEL_ID)?.remove(); 
   }
   
-  // 【关键修改】：全局拖拽控制
   function startPanelDrag(e) {
-    // 排除掉所有“输入框”、“按钮”、“下拉菜单”等必须点击交互的地方
     const tag = e.target.tagName;
     if (['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(tag)) return;
-    
-    // 排除特定组件的内部误触
     if (e.target.closest('.npcpv-card, .npcpv-chip, .npcpv-close, [data-action], .npcpv-actions')) return;
     
     const win = document.querySelector('.npcpv-root');
@@ -1016,7 +1020,6 @@
       let newX = panelDrag.left + dx;
       let newY = panelDrag.top + dy;
       
-      // 拖拽时依旧锁死屏幕边界，绝对不让你拖到顶出去
       newX = Math.max(0, Math.min(window.innerWidth - 40, newX));
       newY = Math.max(0, Math.min(window.innerHeight - 40, newY)); 
       
@@ -1046,17 +1049,8 @@
     btn.className = 'npcpv-open-button';
     btn.title = 'NPC预览表：点击打开，拖动移动位置';
     btn.addEventListener('pointerdown', startButtonDrag);
-    btn.addEventListener('touchend', e => {
-      if (Date.now() - lastButtonOpenAt < 450) return;
-      lastButtonOpenAt = Date.now();
-      e.preventDefault();
-      openPanel().catch(reportOpenError);
-    }, { passive: false });
-    btn.addEventListener('click', e => {
-      if (Date.now() - lastButtonOpenAt < 450) return;
-      lastButtonOpenAt = Date.now();
-      openPanel(e).catch(reportOpenError);
-    });
+    
+    // 【新功能】移除冗余点击事件，统一由拖拽逻辑结算时的状态切换，以防点击穿透和冲突
     document.body.appendChild(btn);
     applyButtonSettings();
   }
@@ -1153,7 +1147,12 @@
       } else {
         if (Date.now() - lastButtonOpenAt >= 450) {
           lastButtonOpenAt = Date.now();
-          openPanel().catch(reportOpenError);
+          // 【新功能】加入切换逻辑：如果存在就关掉，不存在就打开
+          if (document.getElementById(PANEL_ID)) {
+             closePanel();
+          } else {
+             openPanel().catch(reportOpenError);
+          }
         }
       }
       setTimeout(() => { buttonDrag = null; }, 0);
