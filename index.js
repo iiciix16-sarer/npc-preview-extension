@@ -46,10 +46,10 @@
   ];
 
   const MOODS = [
-    ['calm', '平静', '😌'], ['happy', '愉悦', '😊'], ['angry', '愤怒', '😤'],
-    ['sad', '悲伤', '😢'], ['fear', '恐惧', '😰'], ['love', '爱意', '❤️'],
-    ['jealous', '嫉妒', '🤢'], ['annoyed', '烦躁', '😒'], ['excited', '兴奋', '🤩'],
-    ['shy', '害羞', '😳'], ['guilty', '心虚', '😅'], ['cold', '冷漠', '🧊'],
+    ['calm', '平静', '😐'], ['happy', '愉悦', '😆'], ['angry', '愤怒', '😤'],
+    ['sad', '悲伤', '😿'], ['fear', '恐惧', '😱'], ['love', '爱意', '❤️'],
+    ['jealous', '嫉妒', '👿'], ['annoyed', '烦躁', '😾'], ['excited', '兴奋', '🤩'],
+    ['shy', '害羞', '😳'], ['guilty', '心虚', '🫢'], ['cold', '冷漠', '🧊'],
   ];
 
   let rows = [];
@@ -65,7 +65,6 @@
   let panelH = null;
   let panelDrag = null;
 
-  // 获取上下文隔离的前缀
   function ctxKey(prefix) {
     try {
       const ctx = window.SillyTavern?.getContext?.();
@@ -86,7 +85,6 @@
     return String(name || '').replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
   }
 
-  // --- 本地存储封装 ---
   function registry() { return parse(localStorage.getItem(ctxKey(REG_PREFIX)) || '[]', []); }
   function saveRegistry(value) { localStorage.setItem(ctxKey(REG_PREFIX), JSON.stringify(value)); }
   function avatars() { return parse(localStorage.getItem(ctxKey(AVATAR_PREFIX)) || '{}', {}); }
@@ -106,7 +104,6 @@
   function buttonSettings() { return parse(localStorage.getItem(ctxKey(SETTINGS_PREFIX)) || 'null', defaultSettings()) || defaultSettings(); }
   function saveButtonSettings(value) { localStorage.setItem(ctxKey(SETTINGS_PREFIX), JSON.stringify(value)); }
 
-  // --- 核心：完全原生的同步变量读写（脱离数据库） ---
   function getVarSync(key, fallback) {
     try {
       const ctx = window.SillyTavern?.getContext?.();
@@ -129,7 +126,6 @@
     localStorage.setItem(ctxKey('npcv_' + key + '_'), String(value));
   }
 
-  // --- 暴露给酒馆的全局 API 对象 ---
   window.NPCPreviewAPI = {
     get: function(name) {
        const reg = registry().find(r => r.name === name);
@@ -187,7 +183,6 @@
     list: function() { return registry().map(r => r.name); }
   };
 
-  // 监听酒馆原生事件做静默自动同步
   if (window.eventSource && !window._npcpv_event_bound) {
       window._npcpv_event_bound = true;
       window.eventSource.on('chat_completion', () => {
@@ -197,7 +192,7 @@
               chatCompletionCount++;
               if (chatCompletionCount >= interval) {
                   chatCompletionCount = 0;
-                  doAISync(true); // background silent
+                  doAISync(true);
               }
           }
       });
@@ -226,22 +221,15 @@
      }
   }
 
-  function statusOf(value) { return STATUSES.find(x => x[0] === value) || STATUSES[0]; }
-  function moodOf(value) { return MOODS.find(x => x[0] === value) || MOODS[0]; }
-  function affectionColor(value) {
-    const n = Number(value) || 0;
-    if (n < 0) return '#e53935';
-    if (n >= 80) return '#2e7d32';
-    if (n >= 50) return '#43a047';
-    if (n >= 20) return '#81c784';
-    if (n > 0) return '#c8e6c9';
-    return '#bdbdbd';
+  function parseHistory(value) {
+    if (Array.isArray(value)) return value;
+    return parse(String(value || '[]'), []);
   }
 
   function parseRelations(relText) {
      const links = [];
      if(!relText) return links;
-     const regex = /([^\(（、，,]+)(?:[\(（]([^)）]+)[\)）])?/g;
+     const regex = /([^\(（、，,;；\n]+)(?:[\(（]([^)）]+)[\)）])?/g;
      let match;
      while ((match = regex.exec(relText)) !== null) {
          const name = match[1].trim();
@@ -250,51 +238,48 @@
      return links;
   }
 
-  // 关系网图绘制 (支持点击节点跳转)
   function relationGraphHtml(selected) {
     const names = registry().map(r => r.name);
     const relText = getVarSync(VAR_PREFIX + keyName(selected['NPC名称']) + '_关系', '');
     const links = parseRelations(relText);
-    
-    // 过滤出存在于名册中的有效NPC节点，最多取前8个避免拥挤
     const validLinks = links.filter(l => names.includes(l.name)).slice(0, 8);
     
-    if (!validLinks.length) return '<div class="npcpv-empty compact">暂无网状关系。<br>格式示例：张三(宿敌)、李四(旧友)</div>';
+    if (!validLinks.length) return '<div class="npcpv-empty compact">暂无网状关系。<br>格式：名字(关系)、名字(关系)</div>';
     
     const center = { x: 130, y: 85 };
-    const r = 62; // 半径
+    const r = 62;
     
     const positions = validLinks.map((l, i) => {
         const angle = (i / validLinks.length) * Math.PI * 2 - Math.PI/2;
-        return { 
-           x: center.x + Math.cos(angle) * r, 
-           y: center.y + Math.sin(angle) * r, 
-           name: l.name, 
-           label: l.label 
-        };
+        return { x: center.x + Math.cos(angle) * r, y: center.y + Math.sin(angle) * r, name: l.name, label: l.label };
     });
     
     const lines = positions.map(p => {
         const midX = (center.x + p.x)/2;
         const midY = (center.y + p.y)/2;
-        return `<line x1="${center.x}" y1="${center.y}" x2="${p.x}" y2="${p.y}"></line>
-                <rect x="${midX-16}" y="${midY-8}" width="32" height="16" fill="#fbfdfb" rx="4"></rect>
-                <text x="${midX}" y="${midY+3}" text-anchor="middle" class="npcpv-graph-edge">${esc(p.label).slice(0,4)}</text>`;
+        let color = '#bdbdbd';
+        if (['宿敌','仇人','敌对','讨厌','嫉妒'].includes(p.label)) color = '#e53935';
+        if (['挚友','情侣','喜欢','爱慕','贴贴','爱意'].includes(p.label)) color = '#e91e63';
+        if (['手下','上司','同僚','主仆','师徒'].includes(p.label)) color = '#1e88e5';
+        
+        return `<line x1="${center.x}" y1="${center.y}" x2="${p.x}" y2="${p.y}" stroke="${color}" stroke-width="1.5"></line>
+                <rect x="${midX-16}" y="${midY-7}" width="32" height="14" fill="#ffffff" rx="3" stroke="${color}" stroke-width="0.5"></rect>
+                <text x="${midX}" y="${midY+3}" text-anchor="middle" style="fill:${color};font-size:8px;font-weight:bold;">${esc(p.label).slice(0,4)}</text>`;
     }).join('');
     
     const circles = positions.map(p => `
-        <g class="npcpv-graph-node" data-target="${esc(p.name)}">
-          <circle cx="${p.x}" cy="${p.y}" r="20"></circle>
-          <text x="${p.x}" y="${p.y+4}" text-anchor="middle">${esc(p.name).slice(0,4)}</text>
+        <g class="npcpv-node clickable" data-npc="${esc(p.name)}">
+          <circle cx="${p.x}" cy="${p.y}" r="18"></circle>
+          <text x="${p.x}" y="${p.y+4}" text-anchor="middle" style="font-size:9px;fill:var(--npcpv-text);">${esc(p.name).slice(0,4)}</text>
         </g>`).join('');
         
     const centerCircle = `
         <g>
-          <circle cx="${center.x}" cy="${center.y}" r="26" class="core"></circle>
-          <text x="${center.x}" y="${center.y+4}" text-anchor="middle">${esc(selected['NPC名称']).slice(0,4)}</text>
+          <circle cx="${center.x}" cy="${center.y}" r="24" style="fill:var(--npcpv-accent);stroke:none;"></circle>
+          <text x="${center.x}" y="${center.y+4}" text-anchor="middle" style="fill:#ffffff;font-size:10px;font-weight:bold;">${esc(selected['NPC名称']).slice(0,4)}</text>
         </g>`;
 
-    return `<svg class="npcpv-graph" viewBox="0 0 260 170">${lines}${circles}${centerCircle}</svg>`;
+    return `<svg class="npcpv-graph" viewBox="0 0 260 170" style="background:#fbfdfb;border:1px solid #e3f2fd;border-radius:8px;margin-top:8px;width:100%;height:170px;">${lines}${circles}${centerCircle}</svg>`;
   }
 
   function getChatTextForAi() {
@@ -303,65 +288,73 @@
       if (th?.getLastMessageId && th?.getChatMessages) {
         const last = th.getLastMessageId();
         const messages = th.getChatMessages(`0-${last}`, { include_swipes: false }) || [];
-        return messages.slice(-30).map(m => `${m.is_user?'User':'Char'}: ${m.message || m.mes || m.content || ''}`).join('\n\n');
+        return messages.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.message || m.mes || m.content || ''}`).join('\n\n');
       }
       const ctx = window.SillyTavern?.getContext?.();
-      if (Array.isArray(ctx?.chat)) return ctx.chat.slice(-30).map(m => `${m.is_user?'User':'Char'}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
+      if (Array.isArray(ctx?.chat)) return ctx.chat.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
     } catch (err) { console.warn('[NPC预览表] 提取聊天记录失败', err); }
     return '';
   }
 
   async function doAISync(isSilent = false) {
     const cfg = buttonSettings();
-    if (!window.AutoCardUpdaterAPI?.callAI) {
-       if(!isSilent) showNotice('AI同步需要神数据库插件提供 AutoCardUpdaterAPI.callAI，请确保插件已启用并配置了模型。');
+    if (!cfg.apiKey) {
+       if(!isSilent) showToast('请点击 API与说明 按钮，配置你的 OpenAI Key 后再同步');
        return;
     }
     
-    if(!isSilent) toggleLoading(true, '正在提取聊天剧情...');
+    if(!isSilent) toggleLoading(true, '独立API扫描剧情中...');
     const chat = getChatTextForAi();
     if (!chat) {
-       if(!isSilent) { toggleLoading(false); showNotice('未读取到有效聊天记录。'); }
+       if(!isSilent) { toggleLoading(false); showToast('未读取到聊天记录'); }
        return;
     }
     
     try {
-       const response = await window.AutoCardUpdaterAPI.callAI([
-        { role: 'system', content: '你是NPC提取器。仅输出JSON数组，包含字段：NPC名称, 势力, 身份, 好感度, 状态(online/offline/away/danger/missing), 心情(calm/happy/angry/sad/love/fear等), 备注, 首次登场, 登场事件, NPC关系。若没有信息填空字符串。必须严格按JSON数组返回，不解释。' },
-        { role: 'user', content: `请从以下最新聊天记录中整理活跃的NPC状态更新，输出JSON：\n\n${chat}` },
-       ], { maxTokens: 4000 });
+       const res = await fetch(cfg.apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey}` },
+          body: JSON.stringify({
+             model: cfg.apiModel,
+             messages: [
+               { role: 'system', content: '你是NPC状态判定器。仅输出纯JSON数组，绝对不要有任何解释或markdown格式。数组中每个对象字段严格匹配：NPC名称, 势力, 身份, 好感度, 状态(online/offline/away/danger/missing), 心情(calm/happy/angry/sad/love/fear/excited/shy/guilty/cold), 备注, 首次登场, 登场事件, NPC关系。若某NPC未被提及，不要返回。' },
+               { role: 'user', content: `请提取以下最新对话中出现的NPC状态变化：\n\n${chat}` }
+             ],
+             temperature: 0.2
+          })
+       });
+       
+       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+       const json = await res.json();
+       const responseText = json.choices?.[0]?.message?.content || '';
        
        let list = [];
        try { 
-           const raw = response.match(/\[[\s\S]*\]/)?.[0] || response;
+           const raw = responseText.match(/\[[\s\S]*\]/)?.[0] || responseText;
            list = JSON.parse(raw); 
        } catch(e) { 
-           if(!isSilent) showNotice('模型返回的格式非JSON：' + response.slice(0, 100)); 
-           toggleLoading(false);
-           return; 
+           if(!isSilent) showToast('AI返回解析失败，请检查模型输出'); 
+           toggleLoading(false); return; 
        }
        
        if(!Array.isArray(list)) { toggleLoading(false); return; }
        
-       let ok = 0;
+       let count = 0;
        for (const item of list) {
           if (!item['NPC名称']) continue;
-          window.NPCPreviewOpen.update(item['NPC名称'], {
+          window.NPCPreviewAPI.update(item['NPC名称'], {
              '势力': item['势力'], '身份': item['身份'], '好感度': item['好感度'],
              '状态': item['状态'], '心情': item['心情'], '备注': item['备注'],
-             '首次登场': item['首次登场'], '登场事件': item['登场事件'], 'NPC关系': item['NPC关系']
+             '首次登场': item['首次登场'], '登场事件': item['登场事件'], '关系': item['NPC关系']
           });
-          ok++;
+          count++;
        }
-       if(!isSilent) {
-          toggleLoading(false);
-          showNotice(`AI同步完成：成功识别并更新了 ${ok} 个 NPC 的状态。`);
-       }
+       
+       toggleLoading(false);
+       if(!isSilent) showToast(`状态刷新成功！更新了 ${count} 位 NPC 变量`);
     } catch(err) {
-       if(!isSilent) {
-          toggleLoading(false);
-          showNotice('调用大模型API失败：' + (err.message || '未知错误'));
-       }
+       toggleLoading(false);
+       if(!isSilent) showToast('独立扫描失败：' + (err.message || '网络错误'));
     }
   }
 
@@ -382,10 +375,10 @@
         '首次登场': getVarSync(VAR_PREFIX + key + '_初见', ''),
         '登场事件': getVarSync(VAR_PREFIX + key + '_事件', ''),
         'NPC关系': getVarSync(VAR_PREFIX + key + '_关系', ''),
-        '历史': parseHistory(getVarSync(VAR_PREFIX + key + '_历史', '[]')) || []
+        '历史': parseHistory(getVarSync(VAR_PREFIX + key + '_历史', '[]'))
       });
     }
-    rows = result.sort((a, b) => (ex[a['NPC名称']]?.order ?? 999999) - (ex[b['NPC名称']]?.order ?? 999999));
+    rows = result.sort((a, b) => (ex[a['NPC名称']]?.order ?? 999) - (ex[b['NPC名称']]?.order ?? 999));
   }
 
   function writeField(row, field, value) {
@@ -400,19 +393,23 @@
      }
      
      const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', '关系': '_关系' };
-     if(attrMap[field]) {
-         setVarSync(VAR_PREFIX + key + attrMap[field], value);
-     }
+     if(attrMap[field]) setVarSync(VAR_PREFIX + key + attrMap[field], value);
      
      if (field === '好感度') {
-         const historyRaw = parseHistory(getVarSync(VAR_PREFIX + key + '_历史', '[]'));
-         const history = Array.isArray(historyRaw) ? historyRaw : [];
+         const history = parseHistory(getVarSync(VAR_PREFIX + key + '_历史', '[]'));
          history.push({ time: new Date().toISOString(), value: Number(value) || 0 });
          setVarSync(VAR_PREFIX + key + '_历史', JSON.stringify(history.slice(-80)));
      }
      
      loadRowsSync();
      render();
+  }
+
+  function toggleGroup(name) {
+    const cfg = buttonSettings();
+    const collapsedGroups = { ...(cfg.collapsedGroups || {}) };
+    collapsedGroups[name] = !collapsedGroups[name];
+    saveButtonSettings({ ...cfg, collapsedGroups });
   }
 
   function filteredRows() {
@@ -435,19 +432,18 @@
     const cfg = buttonSettings();
     const collapsed = cfg.collapsedGroups || {};
     const grouped = new Map();
-    for (const row of rows) {
+    for (const row of filteredRows()) {
       const group = row['势力'] || '未分组';
       if (!grouped.has(group)) grouped.set(group, []);
       grouped.get(group).push(row);
     }
-    if (!grouped.size) return '<div class="npcpv-empty" style="grid-column:1/-1">名册空空如也<br>点击右上角「+ 新NPC」</div>';
+    if (!grouped.size) return '<div class="npcpv-empty" style="grid-column:1/-1">未检索到NPC档案<br>点击右上角「+ 新NPC」</div>';
     return Array.from(grouped.entries()).map(([group, list]) => `<div class="npcpv-group"><button class="npcpv-group-title" data-group="${esc(group)}">${collapsed[group] ? '▸' : '▾'} ${esc(group)} <span>${list.length}</span></button><div class="npcpv-group-cards ${collapsed[group] ? 'collapsed' : ''}">${list.map(r => cardHtml(r, selected && String(r.id) === String(selected.id))).join('')}</div></div>`).join('');
   }
 
   function detailHtml(row) {
     const name = row['NPC名称'] || '?';
     const aff = Number(row['好感度']) || 0;
-    const mood = moodOf(row['心情']);
     const avatar = avatars()[name];
     
     return `<button class="npcpv-btn npcpv-back-btn" data-action="back-to-list">⬅ 返回名册</button>
@@ -482,7 +478,7 @@
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
     const selected = rows.find(r => String(r.id) === String(selectedId));
-    const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
+    const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力'] || '未分组').filter(Boolean))).sort()];
     
     const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     const viewClass = selected ? 'view-detail' : 'view-list';
@@ -491,6 +487,7 @@
       <div class="npcpv-header">
          <div class="npcpv-title">NPC 面板 <span class="npcpv-mode">纯变量引擎</span></div>
          <div class="npcpv-actions">
+           <button class="npcpv-btn" data-action="local-refresh">🔄 刷新</button>
            <button class="npcpv-btn primary" data-action="api-settings">🔌 API与说明</button>
            <button class="npcpv-btn" data-action="add">+ 新NPC</button>
            <button class="npcpv-btn danger" data-action="clear-all">清空</button>
@@ -519,12 +516,25 @@
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
-    root.querySelector('[data-action="clear-all"]')?.addEventListener('click', () => { if(confirm('彻底抹除所有NPC？')) { saveRegistry([]); loadRowsSync(); render(); } });
+    root.querySelector('[data-action="clear-all"]')?.addEventListener('click', () => { if(confirm('彻底抹除所有NPC变量？')) { saveRegistry([]); loadRowsSync(); render(); } });
     root.querySelector('[data-action="api-settings"]')?.addEventListener('click', showApiDocsDialog);
+    
+    // 纯本地无Token消耗刷新
+    root.querySelector('[data-action="local-refresh"]')?.addEventListener('click', () => {
+         loadRowsSync();
+         render();
+         showToast('本地名册变量加载完毕');
+    });
     
     root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
     root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; render(); }));
-    root.querySelectorAll('[data-group]').forEach(btn => btn.addEventListener('click', () => { toggleGroup(btn.dataset.group); render(); }));
+    root.querySelectorAll('[data-group]').forEach(btn => {
+      btn.addEventListener('click', () => { 
+         toggleGroup(btn.dataset.group); 
+         loadRowsSync();
+         render(); 
+      });
+    });
     
     root.querySelectorAll('.npcpv-card').forEach(card => {
       card.addEventListener('click', () => { selectedId = card.dataset.id; render(); });
@@ -533,13 +543,13 @@
       card.addEventListener('drop', e => { e.preventDefault(); reorderNpc(e.dataTransfer.getData('text/plain'), card.dataset.id); });
     });
     
-    // 关系网图节点穿透点击
+    // Wiki式穿透点击跳转
     root.querySelectorAll('.npcpv-node.clickable').forEach(node => {
       node.addEventListener('click', () => {
          const tName = node.getAttribute('data-npc');
          const tNpc = rows.find(r => r['NPC名称'] === tName);
          if(tNpc) { selectedId = tNpc.id; render(); }
-         else showToast(`系统内暂无名为 [${tName}] 的详细档案`);
+         else showToast(`系统内暂无名为 [${tName}] 的独立档案`);
       });
     });
 
@@ -582,6 +592,7 @@
     const all = extras();
     visible.forEach((row, index) => { all[row['NPC名称']] = { ...(all[row['NPC名称']] || {}), order: index }; });
     saveExtras(all);
+    loadRowsSync();
     render();
   }
 
@@ -601,7 +612,7 @@
     showSubDialog(`
       <h3>🔌 状态扫描器与 API</h3>
       <div class="npcpv-api-docs">
-        <details open>
+        <details>
           <summary>👨‍💻 开发者控制台 (酒馆宏调用代码)</summary>
           <div class="npcpv-doc-content">
             <div class="npcpv-doc-desc">将以下代码直接粘贴至「快速回复」或宏指令中，可实现纯同步瞬间读取：</div>
@@ -646,7 +657,7 @@
       };
       document.getElementById('cfg-manual-sync').onclick = () => {
          closeSubDialog();
-         window.NPCPreviewAPI.syncNow();
+         doAISync(false);
       };
     });
   }
@@ -679,7 +690,7 @@
           const min = Math.min(img.width, img.height);
           ctx.drawImage(img, (img.width - min)/2, (img.height - min)/2, min, min, 0, 0, 220, 220);
           const av = avatars(); av[item['NPC名称']] = canvas.toDataURL('image/jpeg', 0.82);
-          saveAvatars(av); render();
+          saveAvatars(av); loadRowsSync(); render();
         };
         img.src = ev.target.result;
       };
@@ -688,9 +699,8 @@
     input.click();
   }
 
-  // 面板拖拽
   function startPanelDrag(e) {
-    if (['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'DETAILS', 'SUMMARY'].includes(e.target.tagName)) return;
+    if (['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'DETAILS', 'SUMMARY', 'CODE'].includes(e.target.tagName)) return;
     if (e.target.closest('.npcpv-card, .npcpv-chip, .npcpv-close, .npcpv-actions, .clickable, code')) return;
     
     const win = document.querySelector('.npcpv-root');
@@ -799,11 +809,8 @@
 
   function updateViewportVars() { document.documentElement.style.setProperty('--npcpv-vw', window.innerWidth+'px'); document.documentElement.style.setProperty('--npcpv-vh', window.innerHeight+'px'); }
 
-  // 保证 window.NPCPreviewAPI 能被全局访问 (绑定在 IIFE 中是为了防止污染被清除)
-  window.NPCPreviewOpen = { update: window.NPCPreviewAPI.update }; // 兼容遗留调用
-
   function boot() {
-    updateViewportVars(); ensureButton(); keepButtonVisible();
+    updateViewportVars(); ensureButton(); keepButtonVisible(); loadRowsSync();
     if(!window._npcpv_obs) {
         window._npcpv_obs = new MutationObserver(() => { if (!document.getElementById(BUTTON_ID)) ensureButton(); });
         window._npcpv_obs.observe(document.body, { childList: true });
