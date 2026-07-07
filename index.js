@@ -4,6 +4,8 @@
   // --- 样式自动注入 ---
   const style = document.createElement('style');
   style.innerHTML = `
+    .npcpv-root { position: fixed !important; z-index: 999999 !important; }
+    .npcpv-open-button { position: fixed !important; z-index: 999999 !important; }
     .npcpv-loading-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.6); backdrop-filter: blur(4px); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s; opacity: 0; pointer-events: none; border-radius: 14px; }
     .npcpv-loading-overlay.active { opacity: 1; pointer-events: auto; }
     .npcpv-spinner { width: 36px; height: 36px; border: 4px solid var(--npcpv-accent); border-top-color: transparent; border-radius: 50%; animation: npcpv-spin 1s linear infinite; }
