@@ -645,26 +645,56 @@
 
   function normalizeName(value) { return String(value || '').replace(/[《》【】\[\]「」『』“”"'`]/g, '').replace(/\s+/g, '').trim(); }
   function splitNames(value) { return String(value || '').replace(/[\[\]【】]/g, '\n').split(/[、,，/|；;\n\r]+/).map(v => v.replace(/^\s*(?:[-*•]|\d+[.、])\s*/g, '').replace(/(?:身份|势力|阵营|组织|职业|职位|职务|定位)\s*[:：].*$/g, '').trim()).filter(Boolean); }
-  function inferFaction(text) { const m = String(text || '').match(/(?:势力|阵营|组织|所属)\s*[:：]\s*([^，。；;\n]{1,16})/); return m ? m[1].trim() : ''; }
-  function inferIdentity(text) { const m = String(text || '').match(/(?:身份|职位|职业|职务|定位)\s*[:：]\s*([^\n]{1,180})/); return m ? m[1].trim() : ''; }
-  
-  function lookupWorldbookInfo(npcName) {
+function inferFaction(text) { 
+    const m = String(text || '').match(/(?:势力|阵营|组织|所属|门派|派系)(?:[\]】\s:：=|-]|是)+([^，。；;\n\r]{1,20})/i);
+    return m ? m[1].trim().replace(/[*#]/g, '') : ''; 
+  }
+
+  function inferIdentity(text) { 
+    const m = String(text || '').match(/(?:身份|职位|职业|职务|定位|角色)(?:[\]】\s:：=|-]|是)+([^，。；;\n\r]{1,180})/i);
+    return m ? m[1].trim().replace(/[*#]/g, '') : ''; 
+  }
+
+  function autoSearchNpcData(npcName) {
     let result = { faction: '', identity: '' };
+    const target = String(npcName).trim().toLowerCase();
+    if (!target) return result;
+
+    const extract = (content) => {
+       if (!content) return;
+       result.faction = result.faction || inferFaction(content);
+       result.identity = result.identity || inferIdentity(content);
+    };
+
     try {
-      if (!window.worldInfo || !window.worldInfo.entries) return result;
-      const entries = Object.values(window.worldInfo.entries);
-      for (const entry of entries) {
-        const keys = Array.isArray(entry.key) ? entry.key : String(entry.key || '').split(',');
-        if (keys.some(k => k.trim() === npcName)) {
-          const content = entry.content || '';
-          result.faction = inferFaction(content);
-          result.identity = inferIdentity(content);
-          if (result.faction || result.identity) break;
+      const reg = registry();
+      const exist = reg.find(r => r.name === npcName);
+      if (exist) { result.faction = exist.faction; result.identity = exist.identity; }
+
+      const wi = window.world_info || (window.SillyTavern && window.SillyTavern.getContext().worldInfo);
+      if (wi && wi.entries) {
+        for (const entry of Object.values(wi.entries)) {
+          let rawKeys = entry.keys || entry.key || [];
+          let keysArray = Array.isArray(rawKeys) ? rawKeys : String(rawKeys).split(',');
+          const isMatch = keysArray.some(k => {
+              const cleanKey = String(k).trim().toLowerCase();
+              return cleanKey && (target.includes(cleanKey) || cleanKey.includes(target));
+          });
+          if (isMatch) extract(entry.content || entry.entry || '');
         }
       }
-    } catch (e) {
-      console.warn('[NPC预览表] 读取世界书失败', e);
+
+      const chars = window.characters || (window.SillyTavern && window.SillyTavern.getContext().characters) || [];
+      const char = chars.find(c => {
+          const cName = String(c.name).trim().toLowerCase();
+          return cName === target || cName.includes(target);
+      });
+      if (char) extract(char.description || char.data?.description || '');
+
+    } catch (e) { 
+      console.warn('[NPC预览表] 自动搜索数据失败:', e); 
     }
+
     return result;
   }
 
@@ -678,33 +708,18 @@
     let currentIdentity = inferIdentity(sourceText);
 
     if (!currentFaction || !currentIdentity) {
-      const wbInfo = lookupWorldbookInfo(clean);
-      currentFaction = currentFaction || wbInfo.faction;
-      currentIdentity = currentIdentity || wbInfo.identity;
+      const autoData = autoSearchNpcData(clean);
+      currentFaction = currentFaction || autoData.faction;
+      currentIdentity = currentIdentity || autoData.identity;
     }
 
     if (!map.has(clean)) {
-      map.set(clean, { 
-        name: clean, 
-        faction: currentFaction, 
-        identity: currentIdentity 
-      });
+      map.set(clean, { name: clean, faction: currentFaction, identity: currentIdentity });
     } else {
       const item = map.get(clean);
       item.faction = item.faction || currentFaction;
       item.identity = item.identity || currentIdentity;
     }
-  }
-  
-  function addCandidate(map, name, sourceText) {
-    const clean = normalizeName(name);
-    if (!clean || clean.length < 2 || clean.length > 18) return;
-    if (/^(用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|名字|NPC名称|NPC姓名|NPC名字|身份|势力)$/.test(clean)) return;
-    if (!/[\u4e00-\u9fffA-Za-z]/.test(clean)) return;
-    if (!map.has(clean)) map.set(clean, { name: clean, faction: inferFaction(sourceText), identity: inferIdentity(sourceText) });
-    const item = map.get(clean);
-    item.faction = item.faction || inferFaction(sourceText);
-    item.identity = item.identity || inferIdentity(sourceText);
   }
 
   function parseImportNames(text) {
