@@ -38,7 +38,6 @@
   let buttonObserver = null;
   let lastButtonOpenAt = 0;
   
-  // 新增：拖拽面板状态变量
   let panelX = null;
   let panelY = null;
   let panelW = null;
@@ -75,7 +74,6 @@
   function saveExtras(value) { localStorage.setItem(ctxKey(EXTRA_PREFIX), JSON.stringify(value)); }
 
   function defaultSettings() {
-    // 新增 panelX, panelY, panelW, panelH 字段
     return { x: null, y: null, color: '#43a047', text: 'NPC', size: 46, panelColor: '#ffffff', accentColor: '#43a047', textColor: '#233323', collapsedGroups: {}, panelX: null, panelY: null, panelW: null, panelH: null };
   }
 
@@ -741,7 +739,6 @@
     const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力']).filter(Boolean))).sort()];
     const warn = mode === '数据库模式' && dbMissingColumns.length ? `<div class="npcpv-db-warn">数据库缺列：${esc(dbMissingColumns.join('、'))}。请补齐后 AI 才能实时维护这些字段。</div>` : '';
     
-    // 修改：使用 npcpv-root 替换 mask，并应用保存的尺寸和位置
     const styleAttr = `${panelW ? `width:${panelW}px;` : ''}${panelH ? `height:${panelH}px;` : ''}${panelX != null ? `left:${panelX}px;top:${panelY}px;transform:none;` : ''}`;
     
     root.innerHTML = `<div class="npcpv-root" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header npcpv-drag-handle"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">${mode}</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div>${warn}<div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
@@ -753,7 +750,6 @@
   function bindEvents(root) {
     const selected = rows.find(r => String(r.id) === String(selectedId));
     
-    // 新增：为标题栏绑定拖拽事件
     root.querySelector('.npcpv-drag-handle')?.addEventListener('pointerdown', startPanelDrag);
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     
@@ -813,8 +809,6 @@
     div.className = 'npcpv-modal-sub';
     div.id = 'npcpv-subdialog';
     div.innerHTML = `<div class="npcpv-dialog">${html}</div>`;
-    
-    // 修改：附加到 npcpv-root 以实现相对定位
     root.querySelector('.npcpv-root').appendChild(div);
     div.querySelectorAll('[data-subclose]').forEach(b => b.addEventListener('click', closeSubDialog));
     if (after) after();
@@ -933,12 +927,23 @@
     updateViewportVars();
     bindLiveUpdates();
     
-    // 修改：打开时从设置恢复面板位置和尺寸
     const cfg = buttonSettings();
     panelX = cfg.panelX;
     panelY = cfg.panelY;
     panelW = cfg.panelW;
     panelH = cfg.panelH;
+    
+    // 【修改点1】：打开面板时进行边界自动修正
+    if (panelX != null || panelY != null) {
+      const maxW = window.innerWidth;
+      const maxH = window.innerHeight;
+      const w = panelW || Math.min(860, maxW - 16);
+      
+      // 限制 x 坐标：最左不能越出屏幕超过面板宽度-40px，最右不能超过屏幕宽度-40px
+      if (panelX != null) panelX = Math.max(-w + 40, Math.min(maxW - 40, panelX));
+      // 限制 y 坐标：顶部绝不允许出界 (最顶为0)，底部保留40px
+      if (panelY != null) panelY = Math.max(0, Math.min(maxH - 40, panelY));
+    }
     
     let root = document.getElementById(PANEL_ID);
     if (!root) {
@@ -966,7 +971,6 @@
   }
 
   function closePanel() { 
-    // 修改：关闭前记录当前面板的坐标和尺寸，并存入 settings
     const win = document.querySelector('.npcpv-root');
     if (win) {
       panelX = parseFloat(win.style.left) || null;
@@ -979,9 +983,7 @@
     document.getElementById(PANEL_ID)?.remove(); 
   }
   
-  // 新增：面板拖拽函数
   function startPanelDrag(e) {
-    // 防止点击按钮或输入框时触发拖动
     if (e.target.closest('.npcpv-actions') || e.target.closest('button') || e.target.closest('input')) return;
     
     const win = document.querySelector('.npcpv-root');
@@ -990,7 +992,6 @@
     const rect = win.getBoundingClientRect();
     const style = window.getComputedStyle(win);
     
-    // 如果窗口是默认居中的（含有 transform），将其转换为绝对 left/top 以便拖拽
     if (style.transform && style.transform !== 'none') {
       win.style.transform = 'none';
       win.style.left = rect.left + 'px';
@@ -1009,8 +1010,16 @@
       if (!panelDrag) return;
       const dx = ev.clientX - panelDrag.startX;
       const dy = ev.clientY - panelDrag.startY;
-      win.style.left = (panelDrag.left + dx) + 'px';
-      win.style.top = (panelDrag.top + dy) + 'px';
+      
+      let newX = panelDrag.left + dx;
+      let newY = panelDrag.top + dy;
+      
+      // 【修改点2】：拖拽时实时限制边界，禁止向上越界（标题栏永远不会被卡住）
+      newX = Math.max(-win.offsetWidth + 40, Math.min(window.innerWidth - 40, newX));
+      newY = Math.max(0, Math.min(window.innerHeight - 40, newY)); 
+      
+      win.style.left = newX + 'px';
+      win.style.top = newY + 'px';
     };
     
     const up = () => {
