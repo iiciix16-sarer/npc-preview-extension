@@ -821,9 +821,9 @@
     input.click();
   }
 
-  function startPanelDrag(e) {
+ function startPanelDrag(e) {
     if (['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'DETAILS', 'SUMMARY', 'CODE'].includes(e.target.tagName)) return;
-    if (e.target.closest('.npcpv-card, .npcpv-chip, .npcpv-close, .npcpv-actions, .clickable, code')) return;
+    if (e.target.closest('.npcpv-card, .npcpv-chip, .npcpv-close, .npcpv-actions, .clickable, code, #npcpv-subdialog')) return;
     
     const win = document.querySelector('.npcpv-root');
     if (!win) return;
@@ -852,9 +852,11 @@
       }
       window.removeEventListener('pointermove', move, { capture: true }); 
       window.removeEventListener('pointerup', up, { capture: true });
+      window.removeEventListener('pointercancel', up, { capture: true }); 
     };
     window.addEventListener('pointermove', move, { capture: true, passive: false }); 
     window.addEventListener('pointerup', up, { capture: true });
+    window.addEventListener('pointercancel', up, { capture: true }); 
   }
 
   function ensureButton() {
