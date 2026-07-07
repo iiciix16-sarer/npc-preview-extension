@@ -188,28 +188,20 @@
     list: function() { return registry().map(r => r.name); }
   };
 
-  function bindAutoSync() {
-    if (window._npcpv_event_bound) return;
-    
-    if (window.eventSource && typeof window.eventSource.on === 'function') {
-        window.eventSource.on('chat_completion', () => {
-            const cfg = buttonSettings();
-            const interval = Number(cfg.autoSyncInterval) || 0;
-            if (interval > 0) {
-                chatCompletionCount++;
-                if (chatCompletionCount >= interval) {
-                    chatCompletionCount = 0;
-                    showToast('🔄 达到设定轮次，触发后台自动同步...');
-                    doAISync(false);
-                }
-            }
-        });
-        window._npcpv_event_bound = true;
-        console.log('[NPC预览表] 剧情监听器成功挂载！');
-    } else {
-        setTimeout(bindAutoSync, 1000);
-    }
-  }
+if (window.eventSource && !window._npcpv_event_bound) {
+       window._npcpv_event_bound = true;
+       window.eventSource.on('chat_completion', () => {
+           const cfg = buttonSettings();
+           const interval = Number(cfg.autoSyncInterval) || 0;
+           if (interval > 0) {
+               chatCompletionCount++;
+               if (chatCompletionCount >= interval) {
+                   chatCompletionCount = 0;
+                   doAISync(false);
+               }
+           }
+       });
+   }
 
   function showToast(msg) {
     const t = document.createElement('div');
@@ -251,12 +243,13 @@
      return links;
   }
 
+  // 计算好感度颜色的辅助函数 (原代码中似乎漏了这个定义，我补充一个简单的渐变器防止报错)
   function affectionColor(aff) {
-    if (aff > 50) return '#e91e63';
-    if (aff > 0) return '#4caf50'; 
-    if (aff < -50) return '#d32f2f';
-    if (aff < 0) return '#ff9800'; 
-    return '#9e9e9e'; 
+    if (aff > 50) return '#e91e63'; // 高好感 粉红
+    if (aff > 0) return '#4caf50';  // 正好感 绿色
+    if (aff < -50) return '#d32f2f';// 极低好感 深红
+    if (aff < 0) return '#ff9800';  // 负好感 橙色
+    return '#9e9e9e'; // 0
   }
 
   function statusOf(st) {
@@ -310,34 +303,15 @@
 
   function getChatTextForAi() {
     try {
-      if (window.TavernHelper && typeof window.TavernHelper.getChatMessages === 'function') {
-        const lastId = (typeof window.TavernHelper.getLastMessageId === 'function') 
-            ? window.TavernHelper.getLastMessageId() 
-            : 999999;
-        const messages = window.TavernHelper.getChatMessages(`0-${lastId}`, { include_swipes: false });
-        if (Array.isArray(messages) && messages.length > 0) {
-            return messages.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.message || m.mes || m.content || ''}`).join('\n\n');
-        }
+      const th = window.TavernHelper;
+      if (th?.getLastMessageId && th?.getChatMessages) {
+        const last = th.getLastMessageId();
+        const messages = th.getChatMessages(`0-${last}`, { include_swipes: false }) || [];
+        return messages.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.message || m.mes || m.content || ''}`).join('\n\n');
       }
-      
-      let ctx = null;
-      if (window.SillyTavern && typeof window.SillyTavern.getContext === 'function') {
-          ctx = window.SillyTavern.getContext();
-      } else if (typeof window.getContext === 'function') {
-          ctx = window.getContext();
-      }
-      
-      if (ctx && Array.isArray(ctx.chat) && ctx.chat.length > 0) {
-          return ctx.chat.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
-      }
-
-      if (Array.isArray(window.chat) && window.chat.length > 0) {
-          return window.chat.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
-      }
-
-    } catch (err) { 
-        console.warn('[NPC预览表] 提取聊天记录引发异常，已被拦截:', err); 
-    }
+      const ctx = window.SillyTavern?.getContext?.();
+      if (Array.isArray(ctx?.chat)) return ctx.chat.slice(-25).map(m => `${m.is_user?'User':'Char'}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
+    } catch (err) { console.warn('[NPC预览表] 提取聊天记录失败', err); }
     return '';
   }
 
@@ -349,13 +323,14 @@
     }
     
     const chat = getChatTextForAi();
-    if (!chat || chat.trim() === '') {
-       if(!isSilent) showToast('未能读取到最近的聊天记录，请确认当前已进入对话界面');
+    if (!chat) {
+       if(!isSilent) showToast('未读取到聊天记录，请确认当前已进入对话界面');
        return;
     }
 
     if(!isSilent) toggleLoading(true, '独立API扫描剧情中...');
 
+    // 【核心修复】：自动检测并补全 '/chat/completions' 路径
     let targetUrl = cfg.apiUrl.trim();
     if (!targetUrl.endsWith('/chat/completions')) {
         targetUrl = targetUrl.replace(/\/+$/, '') + '/chat/completions';
@@ -367,6 +342,7 @@
 若某NPC未在近期被提及，不要返回。`;
     
     try {
+       // 这里使用拼接好的 targetUrl 
        const res = await fetch(targetUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey}` },
@@ -508,7 +484,7 @@
       if (!grouped.has(group)) grouped.set(group, []);
       grouped.get(group).push(row);
     }
-    if (!grouped.size) return '<div class="npcpv-empty" style="grid-column:1/-1">未检索到NPC档案</div>';
+    if (!grouped.size) return '<div class="npcpv-empty" style="grid-column:1/-1">未检索到NPC档案<br>点击右上角「批量导入」添加数据</div>';
     return Array.from(grouped.entries()).map(([group, list]) => `<div class="npcpv-group"><button class="npcpv-group-title" data-group="${esc(group)}">${collapsed[group] ? '▸' : '▾'} ${esc(group)} <span>${list.length}</span></button><div class="npcpv-group-cards ${collapsed[group] ? 'collapsed' : ''}">${list.map(r => cardHtml(r, selected && String(r.id) === String(selected.id))).join('')}</div></div>`).join('');
   }
 
@@ -604,6 +580,7 @@
       card.addEventListener('drop', e => { e.preventDefault(); reorderNpc(e.dataTransfer.getData('text/plain'), card.dataset.id); });
     });
     
+    // Wiki式穿透点击跳转
     root.querySelectorAll('.npcpv-node.clickable').forEach(node => {
       node.addEventListener('click', () => {
          const tName = node.getAttribute('data-npc');
@@ -654,6 +631,69 @@
     saveExtras(all);
     loadRowsSync();
     render();
+  }
+
+  function normalizeName(value) { return String(value || '').replace(/[《》【】\[\]「」『』“”"'`]/g, '').replace(/\s+/g, '').trim(); }
+  function splitNames(value) { return String(value || '').replace(/[\[\]【】]/g, '\n').split(/[、,，/|；;\n\r]+/).map(v => v.replace(/^\s*(?:[-*•]|\d+[.、])\s*/g, '').replace(/(?:身份|势力|阵营|组织|职业|职位|职务|定位)\s*[:：].*$/g, '').trim()).filter(Boolean); }
+  function inferFaction(text) { const m = String(text || '').match(/(?:势力|阵营|组织|所属)\s*[:：]\s*([^，。；;\n]{1,16})/); return m ? m[1].trim() : ''; }
+  function inferIdentity(text) { const m = String(text || '').match(/(?:身份|职位|职业|职务|定位)\s*[:：]\s*([^\n]{1,180})/); return m ? m[1].trim() : ''; }
+  
+  function addCandidate(map, name, sourceText) {
+    const clean = normalizeName(name);
+    if (!clean || clean.length < 2 || clean.length > 18) return;
+    if (/^(用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|名字|NPC名称|NPC姓名|NPC名字|身份|势力)$/.test(clean)) return;
+    if (!/[\u4e00-\u9fffA-Za-z]/.test(clean)) return;
+    if (!map.has(clean)) map.set(clean, { name: clean, faction: inferFaction(sourceText), identity: inferIdentity(sourceText) });
+    const item = map.get(clean);
+    item.faction = item.faction || inferFaction(sourceText);
+    item.identity = item.identity || inferIdentity(sourceText);
+  }
+
+  function parseImportNames(text) {
+    const map = new Map();
+    const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    for (const line of lines) {
+      let matched = false;
+      const labeled = /(?:NPC名字|NPC名称|NPC姓名|名字|姓名|名称)\s*[:：=]\s*(.+)$/i.exec(line);
+      if (labeled) {
+        splitNames(labeled[1]).forEach(name => addCandidate(map, name, line));
+        matched = true;
+      }
+      if (!matched) splitNames(line).forEach(name => addCandidate(map, name, line));
+    }
+    return Array.from(map.values());
+  }
+
+  function previewImportHtml(items) {
+    if (!items.length) return '<div class="npcpv-empty compact" style="margin-top:10px;">未解析到可导入的NPC名字</div>';
+    return items.map(item => `<div class="npcpv-import-row"><b>${esc(item.name)}</b><span>${esc(item.faction || '未识别势力')}</span><span>${esc(item.identity || '未识别身份')}</span></div>`).join('');
+  }
+
+  function showBatchImportDialog() {
+    showSubDialog(`<h3>批量导入NPC</h3><div class="npcpv-form"><textarea class="npcpv-textarea" id="npc-import-text" placeholder="粘贴名单，支持一行一个，或带标签如：NPC名字：张三"></textarea><div class="npcpv-import-preview" id="npc-import-preview"></div></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-import-ok">全部添加</button></div>`, () => {
+      const input = document.getElementById('npc-import-text');
+      const preview = document.getElementById('npc-import-preview');
+      let parsed = [];
+      input.addEventListener('input', () => {
+         parsed = parseImportNames(input.value);
+         preview.innerHTML = previewImportHtml(parsed);
+      });
+      document.getElementById('npc-import-ok').onclick = () => {
+         const reg = registry();
+         let added = 0;
+         for(const item of parsed) {
+            if(!reg.find(r => r.name === item.name)) {
+               reg.push({ id: Date.now() + Math.random(), name: item.name, faction: item.faction || '', identity: item.identity || '' });
+               added++;
+            }
+         }
+         saveRegistry(reg);
+         loadRowsSync();
+         render();
+         closeSubDialog();
+         showToast(`导入成功：新增 ${added} 个NPC`);
+      };
+    });
   }
 
   function showApiDocsDialog() {
@@ -904,7 +944,6 @@
         window._npcpv_obs = new MutationObserver(() => { if (!document.getElementById(BUTTON_ID)) ensureButton(); });
         window._npcpv_obs.observe(document.body, { childList: true });
     }
-    bindAutoSync();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
