@@ -556,14 +556,15 @@
     const viewClass = selected ? 'view-detail' : 'view-list';
 
     root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal">
-      <div class="npcpv-header">
+<div class="npcpv-header">
          <div class="npcpv-title">NPC 面板 <span class="npcpv-mode">纯变量引擎</span></div>
          <div class="npcpv-actions">
            <button class="npcpv-btn primary" data-action="api-settings">🔌 API与说明</button>
+           <button class="npcpv-btn" data-action="manual-sync" style="background:#e3f2fd; color:#1976d2; border-color:#bbdefb;">⚡ 提取</button>
            <button class="npcpv-btn danger" data-action="clear-all">清空</button>
            <button class="npcpv-close" data-action="close">×</button>
          </div>
-      </div>
+       </div>
       <div class="npcpv-body">
          <div class="npcpv-list">
            <input class="npcpv-search" value="${esc(query)}" placeholder="搜索名册..." data-action="search">
@@ -587,6 +588,12 @@
     root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
     root.querySelector('[data-action="clear-all"]')?.addEventListener('click', () => { if(confirm('彻底抹除所有NPC变量？')) { saveRegistry([]); loadRowsSync(); render(); } });
     root.querySelector('[data-action="api-settings"]')?.addEventListener('click', showApiDocsDialog);
+    root.querySelector('[data-action="manual-sync"]')?.addEventListener('click', () => {
+        const cfg = buttonSettings();
+        if (!cfg.apiKey) { showToast('请先配置 API Key (点击 API与说明)'); return; }
+        triggerButtonGlow();
+        doAISync(false);
+    });
 
     root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
     root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; render(); }));
