@@ -401,6 +401,7 @@
       for (const item of list) {
         const npcName = item['NPC名称'] || item['name'] || item['npc_name'];
         if (!npcName) continue;
+        if (/^(User|user|用户|玩家|主角|你|我)$/.test(npcName.trim())) continue;
 
         window.NPCPreviewAPI.update(npcName, {
           '势力': item['势力'] || item['faction'],
@@ -428,7 +429,7 @@
       if(!isSilent) showToast('请求失败：' + (err.message || '网络或跨域错误'));
       console.error('[NPC预览表] 请求抛出异常:', err);
     }
-  } // <-- 修复：补全 doAISync 的结束大括号
+  }
 
   function loadRowsSync() {
     const result = [];
@@ -590,9 +591,9 @@
     root.querySelector('[data-action="api-settings"]')?.addEventListener('click', showApiDocsDialog);
     root.querySelector('[data-action="manual-sync"]')?.addEventListener('click', () => {
         const cfg = buttonSettings();
-        if (!cfg.apiKey) { showToast('请先配置 API Key (点击 API与说明)'); return; }
+        if (!cfg.apiKey) { showToast('未配置 API Key，请先点击「API与说明」设置'); return; }
         triggerButtonGlow();
-        doAISync(false);
+        doAISync(false).catch(() => {});
     });
 
     root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
@@ -673,7 +674,7 @@
   function addCandidate(map, name, sourceText) {
     const clean = normalizeName(name);
     if (!clean || clean.length < 2 || clean.length > 18) return;
-    if (/^(用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|名字|NPC名称|NPC姓名|NPC名字|身份|势力)$/.test(clean)) return;
+    if (/^(User|user|用户|玩家|主角|你|我|他|她|它|众人|路人|角色|人物|NPC|名称|姓名|名字|NPC名称|NPC姓名|NPC名字|身份|势力)$/.test(clean)) return;
     if (!/[\u4e00-\u9fffA-Za-z]/.test(clean)) return;
     if (!map.has(clean)) map.set(clean, { name: clean, faction: inferFaction(sourceText), identity: inferIdentity(sourceText) });
     const item = map.get(clean);
@@ -974,12 +975,4 @@
     updateViewportVars(); ensureButton(); keepButtonVisible(); loadRowsSync();
     if(!window._npcpv_obs) {
         window._npcpv_obs = new MutationObserver(() => { if (!document.getElementById(BUTTON_ID)) ensureButton(); });
-        window._npcpv_obs.observe(document.body, { childList: true });
-    }
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
-  window.addEventListener('resize', () => { updateViewportVars(); keepButtonVisible(); });
-  setTimeout(boot, 500);
-
-})();
+     
