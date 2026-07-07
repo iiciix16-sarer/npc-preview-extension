@@ -340,7 +340,7 @@
       syncButton.classList.add('syncing');
     }
 
-    if(!isSilent) toggleLoading(true, '独立API扫描剧情中...');
+    if(!isSilent) toggleLoading(true, '剧情扫描中...');
 
     // 【核心修复】：自动检测并补全 '/chat/completions' 路径
     let targetUrl = cfg.apiUrl.trim();
