@@ -100,12 +100,12 @@
       x: null, y: null, color: '#43a047', text: 'NPC', size: 46, 
       panelColor: '#ffffff', accentColor: '#43a047', textColor: '#233323', 
       collapsedGroups: {}, panelX: null, panelY: null, panelW: null, panelH: null,
-      apiUrl: 'https://api.openai.com/v1/chat/completions', apiKey: '', apiModel: 'gpt-4o-mini', autoSyncInterval: 0
+      apiUrl: 'https://api.openai.com/v1', apiKey: '', apiModel: 'gpt-4o-mini', autoSyncInterval: 0
     };
   }
   
-  function buttonSettings() { return parse(localStorage.getItem(ctxKey(SETTINGS_PREFIX)) || 'null', defaultSettings()) || defaultSettings(); }
-  function saveButtonSettings(value) { localStorage.setItem(ctxKey(SETTINGS_PREFIX), JSON.stringify(value)); }
+  function buttonSettings() { return parse(localStorage.getItem(SETTINGS_PREFIX + 'global') || 'null', defaultSettings()) || defaultSettings(); }
+  function saveButtonSettings(value) { localStorage.setItem(SETTINGS_PREFIX + 'global', JSON.stringify(value)); }
 
   function getVarSync(key, fallback) {
     try {
