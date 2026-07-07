@@ -19,10 +19,10 @@
   ];
 
   const MOODS = [
-    ['calm', '平静', '😌'], ['happy', '愉悦', '😊'], ['angry', '愤怒', '😤'],
-    ['sad', '悲伤', '😢'], ['fear', '恐惧', '😰'], ['love', '爱意', '❤️'],
-    ['jealous', '嫉妒', '🤢'], ['annoyed', '烦躁', '😒'], ['excited', '兴奋', '🤩'],
-    ['shy', '害羞', '😳'], ['guilty', '心虚', '😅'], ['cold', '冷漠', '🧊'],
+    ['calm', '平静', '😐'], ['happy', '愉悦', '😆'], ['angry', '愤怒', '😤'],
+    ['sad', '悲伤', '😿'], ['fear', '恐惧', '😱'], ['love', '爱意', '❤️'],
+    ['jealous', '嫉妒', '👿'], ['annoyed', '烦躁', '😾'], ['excited', '兴奋', '🤩'],
+    ['shy', '害羞', '😳'], ['guilty', '心虚', '🫢'], ['cold', '冷漠', '🧊'],
   ];
 
   let rows = [];
@@ -31,7 +31,6 @@
   let query = '';
   let buttonDrag = null;
   let liveUpdateBound = false;
-  let settingsEntryBound = false;
   let buttonObserver = null;
   let lastButtonOpenAt = 0;
   let syncCounter = 0;
@@ -335,7 +334,7 @@
     render();
   }
 
-  async function getVar(key, fallback) {
+  function getVarSync(key, fallback) {
     try {
       const context = window.SillyTavern?.getContext?.();
       if (context?.chatMetadata) {
@@ -362,7 +361,6 @@
     try {
       const ctx = window.SillyTavern?.getContext?.();
       if (Array.isArray(ctx?.chat)) {
-        // 只截取最近 40 句话用于扫描状态，大大节省 Token 且聚焦最新发展
         const recent = ctx.chat.filter(m => m.is_user || m.is_name).slice(-40);
         return recent.map(m => `${m.name || (m.is_user ? 'User' : 'Character')}: ${m.mes || m.message || m.content || ''}`).join('\n\n');
       }
@@ -377,6 +375,7 @@
       generateRawFn = window.generateRaw;
       return generateRawFn;
     }
+    // Fallback checks for SillyTavern module scopes
     try {
       const module = await import('../../../../script.js');
       generateRawFn = module.generateRaw;
@@ -437,47 +436,42 @@
     };
   }
 
-  // ==== 【全新核心机制：原生 API 调用与变量兜底】 ====
-
   async function syncAiFromChat(e) {
-    const btn = e?.currentTarget;
+    const btn = e?.currentTarget || document.querySelector('[data-action="api-info"]');
+    const originalText = btn ? btn.textContent : '';
     if (btn) {
       btn.disabled = true;
-      btn.textContent = '同步中...';
+      btn.textContent = '提取中...';
     }
     const finish = () => {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'AI同步';
+        btn.textContent = originalText || '手动提取';
       }
     };
     try {
       const generateRaw = await getGenerateRaw();
       if (!generateRaw) {
-        const msg = '无法获取酒馆原生 AI 接口 (generateRaw)。请确保你的 SillyTavern 是最新版本。';
-        console.warn(msg);
-        if (btn) showNotice(msg);
+        showNotice('无法获取原生 AI 接口。请确保酒馆处于运行中。');
         return finish();
       }
 
       const chat = getChatTextForAi();
       if (!chat) {
-        if (btn) showNotice('没有读取到近期聊天记录，无法进行提取。');
+        showNotice('没有读取到近期聊天记录，无法进行提取。');
         return finish();
       }
       
       const messages = [
-        { role: 'system', content: '你是 NPC 数据整理器。只输出 JSON 数组，不要解释。提取或更新以下对话中出现过的 NPC 状态。字段必须为：NPC名称, 势力, 身份, 好感度, 状态, 心情, 备注, 首次登场, 登场事件, NPC关系。若无新信息可留空或默认。' },
+        { role: 'system', content: '你是 NPC 数据整理器。只输出 JSON 数组，不要任何开头解释或Markdown说明。提取或更新以下对话中出现过的 NPC 状态。字段必须为：NPC名称, 势力, 身份, 好感度, 状态, 心情, 备注, 首次登场, 登场事件, NPC关系。若无新信息可留空或默认。' },
         { role: 'user', content: `请从以下最近的聊天记录中整理出现过的 NPC，并补全可判断的信息。只输出 JSON 数组：\n\n${chat}` }
       ];
 
       console.log('[NPC预览表] 开始静默调用原生 AI 进行分析...');
       let response = '';
       try {
-        // 适配最新 ST 的传参对象格式
         response = await generateRaw({ messages, quiet: true });
       } catch (err) {
-        // 降级适配老版本位置参数
         response = await generateRaw(messages, true); 
       }
 
@@ -487,12 +481,11 @@
 
       const list = extractJsonArray(response);
       if (!list.length) {
-        if (btn) showNotice('模型已响应，但未从中提取到可更新的 NPC 变动数据。');
+        showNotice('模型已响应，但未从中提取到可更新的 NPC 变动数据。');
         return finish();
       }
       
       let ok = 0;
-      
       for (const item of list) {
         if (!item?.NPC名称) continue;
         
@@ -525,16 +518,14 @@
       
       await loadRows();
       render();
-      if (btn) showNotice(`原生同步完成：模型成功提取并更新了 ${ok} 个 NPC 的数据。`);
+      showNotice(`原生同步完成：成功提取并更新了 ${ok} 个 NPC 的数据。`);
       finish();
     } catch (err) {
       console.error('[NPC预览表] 原生同步失败', err);
-      if (btn) showNotice('AI同步失败：' + (err?.message || String(err || '未知错误')));
+      showNotice('提取失败：' + (err?.message || String(err || '未知错误')));
       finish();
     }
   }
-
-  // ==== 【后台静默轮次监听】 ====
 
   function bindLiveUpdates() {
     if (liveUpdateBound) return;
@@ -551,7 +542,6 @@
           if (syncCounter >= interval) {
             syncCounter = 0;
             console.log(`[NPC预览表] 已达到 ${interval} 轮，后台触发自动提取...`);
-            // 静默同步，不弹出提示
             await syncAiFromChat();
             if (document.getElementById(PANEL_ID)) {
                 await loadRows();
@@ -562,8 +552,6 @@
       });
     }
   }
-
-  // =======================================================
 
   async function readVars() {
     const result = [];
@@ -576,10 +564,10 @@
         'NPC名称': npc.name,
         '势力': npc.faction || '',
         '身份': npc.identity || '',
-        '好感度': Number(await getVar(VAR_PREFIX + key + '_好感', 0)) || 0,
-        '状态': await getVar(VAR_PREFIX + key + '_状态', 'offline'),
-        '心情': await getVar(VAR_PREFIX + key + '_心情', 'calm'),
-        '备注': await getVar(VAR_PREFIX + key + '_备注', ''),
+        '好感度': Number(getVarSync(VAR_PREFIX + key + '_好感', 0)) || 0,
+        '状态': getVarSync(VAR_PREFIX + key + '_状态', 'offline'),
+        '心情': getVarSync(VAR_PREFIX + key + '_心情', 'calm'),
+        '备注': getVarSync(VAR_PREFIX + key + '_备注', ''),
       };
       Object.assign(item, extraFor(npc.name));
       result.push(item);
@@ -588,7 +576,6 @@
   }
 
   async function loadRows() {
-    // 告别数据库检查，百分百原汁原味本地变量读写
     rows = await readVars();
   }
 
@@ -703,7 +690,7 @@
     const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     const viewClass = selected ? 'view-detail' : 'view-list';
     
-    root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">纯变量原生模式</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="ai-sync">AI同步</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
+    root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal"><div class="npcpv-header"><div class="npcpv-title">NPC预览表 <span class="npcpv-mode">纯变量模式</span></div><div class="npcpv-actions"><button class="npcpv-btn primary" data-action="batch-import">批量导入</button><button class="npcpv-btn" data-action="api-info">API接口</button><button class="npcpv-btn" data-action="data-io">数据导入/导出</button><button class="npcpv-btn danger" data-action="clear-all">清空</button><button class="npcpv-btn" data-action="button-settings">UI调试</button><button class="npcpv-btn" data-action="add">+ 新NPC</button><button class="npcpv-close" data-action="close">×</button></div></div><div class="npcpv-body"><div class="npcpv-list"><input class="npcpv-search" value="${esc(query)}" placeholder="搜索名称、势力、身份..." data-action="search"><div class="npcpv-filters">${factions.map(f => `<button class="npcpv-chip ${f === filter ? 'active' : ''}" data-filter="${esc(f)}">${esc(f)}</button>`).join('')}</div><div class="npcpv-cards">${cardsHtml(selected)}</div></div><div class="npcpv-detail">${selected ? detailHtml(selected) : '<div class="npcpv-empty">选择左侧NPC查看详情<br>或使用批量导入添加目录</div>'}</div></div></div></div>`;
     
     applyPanelTheme(root);
     bindEvents(root);
@@ -716,7 +703,7 @@
     root.querySelector('[data-action="close"]')?.addEventListener('click', closePanel);
     root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
     root.querySelector('[data-action="add"]')?.addEventListener('click', showAddDialog);
-    root.querySelector('[data-action="ai-sync"]')?.addEventListener('click', syncAiFromChat);
+    root.querySelector('[data-action="api-info"]')?.addEventListener('click', showApiDialog);
     root.querySelector('[data-action="button-settings"]')?.addEventListener('click', showButtonDialog);
     root.querySelector('[data-action="data-io"]')?.addEventListener('click', showDataDialog);
     root.querySelector('[data-action="batch-import"]')?.addEventListener('click', showBatchImportDialog);
@@ -789,6 +776,36 @@
     });
   }
 
+  function showApiDialog() {
+    showSubDialog(`
+      <h3>🔌 NPCPreviewAPI 接口说明</h3>
+      <div class="npcpv-notice" style="user-select: text;">
+        <p>本插件已向酒馆暴露纯同步的全局 API。你可以直接在<b>快速回复 (Quick Reply)</b> 或 <b>酒馆宏</b> 中复制使用以下代码：</p>
+        
+        <div style="background: #f1f8f2; padding: 10px; border-radius: 8px; margin: 10px 0; border: 1px solid #dcebdc;">
+          <b>1. 获取单个好感度/心情（常用）</b><br>
+          <code style="display:block; margin-top:6px; color:#c62828;">{{//javascript NPCPreviewAPI.getValue('张三', '好感度')}}</code>
+          <code style="display:block; margin-top:6px; color:#c62828;">{{//javascript NPCPreviewAPI.getValue('张三', '心情')}}</code>
+        </div>
+
+        <div style="background: #f1f8f2; padding: 10px; border-radius: 8px; margin: 10px 0; border: 1px solid #dcebdc;">
+          <b>2. 外部脚本静默修改 NPC 数据</b><br>
+          <code style="display:block; margin-top:6px; color:#2e7d32;">NPCPreviewAPI.update('张三', { '好感度': 100, '状态': 'online' })</code>
+          <span style="font-size:11px; color:#666;">（修改后会自动存储，并实时刷新可视化面板）</span>
+        </div>
+      </div>
+      <div class="npcpv-dialog-actions" style="justify-content: space-between;">
+        <button class="npcpv-btn primary" id="npc-api-force-sync" style="background:#0288d1; border-color:#0288d1;">🤖 手动触发AI扫描提取</button>
+        <button class="npcpv-btn" data-subclose="1">关闭说明</button>
+      </div>
+    `, () => {
+      document.getElementById('npc-api-force-sync').onclick = (e) => {
+        closeSubDialog();
+        syncAiFromChat(e);
+      };
+    });
+  }
+
   function previewImportHtml(items) {
     if (!items.length) return '<div class="npcpv-empty compact">未解析到可导入的NPC名字</div>';
     return items.map(item => `<div class="npcpv-import-row"><b>${esc(item.name)}</b><span>${esc(item.faction || '未识别势力')}</span><span>${esc(item.identity || '未识别身份')}</span></div>`).join('');
@@ -825,7 +842,7 @@
   }
 
   function showDataDialog() {
-    showSubDialog(`<h3>数据导入/导出</h3><div class="npcpv-form"><textarea class="npcpv-textarea npcpv-import-input" id="npc-data-json" placeholder="这里会显示导出的 JSON，也可以粘贴备份 JSON 后导入"></textarea><div class="npcpv-small">彻底告别数据库：这里导出的 JSON 将包含所有本地 NPC 变量数据和 UI 设置。你可以随时使用它来备份或跨设备迁移。</div></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" id="npc-data-fill">生成导出JSON</button><button class="npcpv-btn" id="npc-data-download">下载</button><button class="npcpv-btn primary" id="npc-data-import">导入</button><button class="npcpv-btn" data-subclose="1">关闭</button></div>`, () => {
+    showSubDialog(`<h3>数据导入/导出</h3><div class="npcpv-form"><textarea class="npcpv-textarea npcpv-import-input" id="npc-data-json" placeholder="这里会显示导出的 JSON，也可以粘贴备份 JSON 后导入"></textarea><div class="npcpv-small">这里导出的 JSON 将包含所有本地 NPC 变量数据和 UI 设置。你可以随时使用它来备份或跨设备迁移。</div></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" id="npc-data-fill">生成导出JSON</button><button class="npcpv-btn" id="npc-data-download">下载</button><button class="npcpv-btn primary" id="npc-data-import">导入</button><button class="npcpv-btn" data-subclose="1">关闭</button></div>`, () => {
       const area = document.getElementById('npc-data-json');
       document.getElementById('npc-data-fill').onclick = () => { area.value = JSON.stringify(exportPayload(), null, 2); };
       document.getElementById('npc-data-download').onclick = () => downloadJson('npc-preview-backup.json', exportPayload());
@@ -1142,24 +1159,39 @@
     alert('NPC预览表打开失败：' + (err?.message || String(err || '未知错误')));
   }
 
-  // ==== 【全局专属 API 注册】 ====
   window.NPCPreviewAPI = {
+    // 强制触发一次同步
     syncNow: async () => await syncAiFromChat(),
-    getNpc: async (name) => {
+    
+    // 同步获取某个 NPC 的完整 JSON 数据
+    get: (name) => {
       const reg = registry();
       const item = reg.find(n => n.name === name);
       if (!item) return null;
       const key = keyName(name);
       return {
-        ...item,
-        好感度: Number(await getVar(VAR_PREFIX + key + '_好感', 0)) || 0,
-        状态: await getVar(VAR_PREFIX + key + '_状态', 'offline'),
-        心情: await getVar(VAR_PREFIX + key + '_心情', 'calm'),
-        备注: await getVar(VAR_PREFIX + key + '_备注', ''),
+        id: String(item.id),
+        rowIndex: item.id,
+        'NPC名称': item.name,
+        '势力': item.faction || '',
+        '身份': item.identity || '',
+        '好感度': Number(getVarSync(VAR_PREFIX + key + '_好感', 0)) || 0,
+        '状态': getVarSync(VAR_PREFIX + key + '_状态', 'offline'),
+        '心情': getVarSync(VAR_PREFIX + key + '_心情', 'calm'),
+        '备注': getVarSync(VAR_PREFIX + key + '_备注', ''),
         ...(extras()[name] || {})
       };
     },
-    updateNpc: async (name, data) => {
+
+    // 同步获取 NPC 的单个指定数值（如 NPCPreviewAPI.getValue('张三', '好感度')）
+    getValue: (name, key) => {
+      const npc = window.NPCPreviewAPI.get(name);
+      if (!npc) return '';
+      return npc[key] !== undefined ? npc[key] : '';
+    },
+
+    // 外部修改 NPC 数据接口
+    update: async (name, data) => {
        const reg = registry();
        let item = reg.find(n => n.name === name);
        if (!item) {
@@ -1179,8 +1211,10 @@
        await loadRows();
        render();
     },
-    getAll: async () => {
-       return await Promise.all(registry().map(n => window.NPCPreviewAPI.getNpc(n.name)));
+
+    // 同步获取全部 NPC 名单
+    list: () => {
+       return registry().map(n => window.NPCPreviewAPI.get(n.name)).filter(Boolean);
     }
   };
 
