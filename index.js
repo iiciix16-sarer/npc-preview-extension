@@ -661,33 +661,6 @@
     return items.map(item => `<div class="npcpv-import-row"><b>${esc(item.name)}</b><span>${esc(item.faction || '未识别势力')}</span><span>${esc(item.identity || '未识别身份')}</span></div>`).join('');
   }
 
-  function showBatchImportDialog() {
-    showSubDialog(`<h3>批量导入NPC</h3><div class="npcpv-form"><textarea class="npcpv-textarea" id="npc-import-text" placeholder="粘贴名单，支持一行一个，或带标签如：NPC名字：张三"></textarea><div class="npcpv-import-preview" id="npc-import-preview"></div></div><div class="npcpv-dialog-actions"><button class="npcpv-btn" data-subclose="1">取消</button><button class="npcpv-btn primary" id="npc-import-ok">全部添加</button></div>`, () => {
-      const input = document.getElementById('npc-import-text');
-      const preview = document.getElementById('npc-import-preview');
-      let parsed = [];
-      input.addEventListener('input', () => {
-         parsed = parseImportNames(input.value);
-         preview.innerHTML = previewImportHtml(parsed);
-      });
-      document.getElementById('npc-import-ok').onclick = () => {
-         const reg = registry();
-         let added = 0;
-         for(const item of parsed) {
-            if(!reg.find(r => r.name === item.name)) {
-               reg.push({ id: Date.now() + Math.random(), name: item.name, faction: item.faction || '', identity: item.identity || '' });
-               added++;
-            }
-         }
-         saveRegistry(reg);
-         loadRowsSync();
-         render();
-         closeSubDialog();
-         showToast(`导入成功：新增 ${added} 个NPC`);
-      };
-    });
-  }
-
   function showApiDocsDialog() {
     const cfg = buttonSettings();
     showSubDialog(`
@@ -707,7 +680,7 @@
       </div>
       
       <div class="npcpv-form" style="margin-top:14px; border-top:1px solid #eee; padding-top:14px;">
-        <label class="npcpv-label">独立大模型 API (脱离框架依赖)</label>
+        <label class="npcpv-label">模型 API </label>
         <input class="npcpv-input" id="cfg-url" placeholder="API Base URL" value="${esc(cfg.apiUrl)}">
         <input class="npcpv-input" id="cfg-key" type="password" placeholder="API Key (sk-...)" value="${esc(cfg.apiKey)}">
         <input class="npcpv-input" id="cfg-model" placeholder="Model (例如 gpt-4o-mini)" value="${esc(cfg.apiModel)}">
