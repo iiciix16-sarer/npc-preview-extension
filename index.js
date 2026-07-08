@@ -571,9 +571,9 @@ const heartHtml = heartDom.outerHTML;
     <div class="npcpv-section"><div class="npcpv-label">身份特征</div><textarea class="npcpv-textarea npcpv-identity" data-action="identity" placeholder="一句话描述人设">${esc(row['身份'] || '')}</textarea></div>
     
     <div class="npcpv-section"><div class="npcpv-label">好感度</div>
-    <div class="npcpv-aff"><div class="npcpv-affbar"><div class="npcpv-afffill" style="width:${Math.min(Math.abs(aff),100)}%;background:${affectionColor(aff)}"></div></div><div class="npcpv-affval" style="color:${affectionColor(aff)}">${aff}</div></div>
+    ${heartHtml}
     <div class="npcpv-ctrls">${[-10,-5,-1,1,5,10].map(n => `<button class="npcpv-btn" data-action="aff" data-delta="${n}">${n > 0 ? '+' : ''}${n}</button>`).join('')}</div></div>
-    
+
     <div class="npcpv-section"><div class="npcpv-label">当前状态 & 心情</div>
     <div style="display:flex;gap:10px;">
     <select class="npcpv-select" data-action="status">${STATUSES.map(s => `<option value="${s[0]}" ${s[0] === (row['状态'] || 'offline') ? 'selected' : ''}>${s[1]}</option>`).join('')}</select>
@@ -603,9 +603,9 @@ const heartHtml = heartDom.outerHTML;
     
     root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal">
       <div class="npcpv-header">
-         <div class="npcpv-title">NPC 面板 <span class="npcpv-mode">纯变量引擎</span></div>
+         <div class="npcpv-title">NPC 面板 <span class="npcpv-mode">状态变量</span></div>
          <div class="npcpv-actions">
-           <button class="npcpv-btn primary" data-action="api-settings">🔌 API与说明</button>
+           <button class="npcpv-btn primary" data-action="api-settings">🔌 API与更新</button>
            <button class="npcpv-btn danger" data-action="clear-all">清空</button>
            <button class="npcpv-close" data-action="close">×</button>
          </div>
