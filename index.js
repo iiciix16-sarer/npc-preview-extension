@@ -253,41 +253,25 @@
       const clamped = Math.max(0, Math.min(100, Number(affinity) || 0));
       const filledCount = Math.floor(clamped / 10);
       
-      // ==================== 平滑颜色计算 ====================
-      let hue, saturation, lightness;
-      
-      if (clamped <= 20) {
-          hue = 210;
-          saturation = 50 + (clamped * 1.5);
-          lightness = 60 - (clamped * 0.3);
-      } 
-      else if (clamped <= 40) {
-          const t = (clamped - 20) / 20;
-          hue = 210 - (t * 90);
-          saturation = 75 + (t * 15);
-          lightness = 52;
-      } 
-      else if (clamped <= 60) {
-          const t = (clamped - 40) / 20;
-          hue = 120 - (t * 50);
-          saturation = 85 + (t * 10);
-          lightness = 52 + (t * 5);
-      } 
-      else if (clamped <= 80) {
-          const t = (clamped - 60) / 20;
-          hue = 70 - (t * 140);
-          saturation = 90;
-          lightness = 55;
-      } 
-      else {
-          const t = (clamped - 80) / 20;
-          hue = 330 - (t * 30);
-          saturation = 92 - (t * 15);
-          lightness = 55 - (t * 18);
-      }
-      
-      container.style.setProperty('--heart-color', `hsl(${hue}, ${saturation}%, ${lightness}%)`);
-      
+       // ==================== 自定义颜色序列逻辑 ====================
+      // 颜色序列：灰 -> 蓝 -> 青 -> 绿 -> 黄 -> 粉 -> 紫 -> 橙 -> 玫红 -> 正红
+      const colors = [
+          '#9e9e9e', // 0-10: 灰
+          '#2196f3', // 10-20: 蓝
+          '#00bcd4', // 20-30: 青
+          '#4caf50', // 30-40: 绿
+          '#ffeb3b', // 40-50: 黄
+          '#f48fb1', // 50-60: 粉
+          '#9c27b0', // 60-70: 紫
+          '#ff9800', // 70-80: 橙
+          '#e91e63', // 80-90: 玫红
+          '#f44336'  // 90-100: 正红
+      ];
+
+      // 根据当前好感度区间取色
+      const index = Math.min(Math.floor(clamped / 10), 9);
+      container.style.setProperty('--heart-color', colors[index]);
+
       // 生成10颗爱心
       for (let i = 1; i <= 10; i++) {
           const heart = document.createElement('span');
