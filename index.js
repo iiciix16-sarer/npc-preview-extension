@@ -243,78 +243,78 @@
  * @param {number} affinity - 当前好感度 (0-100)
  * @returns {HTMLElement} 好感条容器
  */
-function createAffinityHearts(affinity = 0) {
-    const container = document.createElement('div');
-    container.className = 'npcpv-aff';
-    
-    const heartsContainer = document.createElement('div');
-    heartsContainer.className = 'npcpv-aff-container';
-    
-    const clamped = Math.max(0, Math.min(100, Number(affinity) || 0));
-    const filledCount = Math.floor(clamped / 10);
-    
-    // ==================== 平滑颜色计算 ====================
-    let hue, saturation, lightness;
-    
-    if (clamped <= 20) {
-        hue = 210;
-        saturation = 50 + (clamped * 1.5);
-        lightness = 60 - (clamped * 0.3);
-    } 
-    else if (clamped <= 40) {
-        const t = (clamped - 20) / 20;
-        hue = 210 - (t * 90);        // 蓝 → 绿
-        saturation = 75 + (t * 15);
-        lightness = 52;
-    } 
-    else if (clamped <= 60) {
-        const t = (clamped - 40) / 20;
-        hue = 120 - (t * 50);        // 绿 → 黄橙
-        saturation = 85 + (t * 10);
-        lightness = 52 + (t * 5);
-    } 
-    else if (clamped <= 80) {
-        const t = (clamped - 60) / 20;
-        hue = 70 - (t * 140);        // 黄 → 粉红
-        saturation = 90;
-        lightness = 55;
-    } 
-    else {
-        const t = (clamped - 80) / 20;
-        hue = 330 - (t * 30);        // 粉 → 深红
-        saturation = 92 - (t * 15);
-        lightness = 55 - (t * 18);
-    }
-    
-    container.style.setProperty('--heart-color', `hsl(${hue}, ${saturation}%, ${lightness}%)`);
-    
-    // 生成10颗爱心
-    for (let i = 1; i <= 10; i++) {
-        const heart = document.createElement('span');
-        heart.className = 'npcpv-heart';
-        heart.title = `第 ${i} 级 · ${i * 10} 点好感`;
-        
-        if (i <= filledCount) {
-            heart.classList.add('filled');
-            heart.innerHTML = '🖤🩶🩵💙💚💜💛🧡🩷❤️';
-        } else {
-            heart.classList.add('empty');
-            heart.innerHTML = '♡';
-        }
-        
-        heartsContainer.appendChild(heart);
-    }
-    
-    // 数值显示
-    const valueSpan = document.createElement('span');
-    valueSpan.className = 'npcpv-affval';
-    valueSpan.textContent = `${Math.floor(clamped)}`;
-    
-    container.appendChild(heartsContainer);
-    container.appendChild(valueSpan);
-    
-    return container;
-}
+  function createAffinityHearts(affinity = 0) {
+      const container = document.createElement('div');
+      container.className = 'npcpv-aff';
+      
+      const heartsContainer = document.createElement('div');
+      heartsContainer.className = 'npcpv-aff-container';
+      
+      const clamped = Math.max(0, Math.min(100, Number(affinity) || 0));
+      const filledCount = Math.floor(clamped / 10);
+      
+      // ==================== 平滑颜色计算 ====================
+      let hue, saturation, lightness;
+      
+      if (clamped <= 20) {
+          hue = 210;
+          saturation = 50 + (clamped * 1.5);
+          lightness = 60 - (clamped * 0.3);
+      } 
+      else if (clamped <= 40) {
+          const t = (clamped - 20) / 20;
+          hue = 210 - (t * 90);
+          saturation = 75 + (t * 15);
+          lightness = 52;
+      } 
+      else if (clamped <= 60) {
+          const t = (clamped - 40) / 20;
+          hue = 120 - (t * 50);
+          saturation = 85 + (t * 10);
+          lightness = 52 + (t * 5);
+      } 
+      else if (clamped <= 80) {
+          const t = (clamped - 60) / 20;
+          hue = 70 - (t * 140);
+          saturation = 90;
+          lightness = 55;
+      } 
+      else {
+          const t = (clamped - 80) / 20;
+          hue = 330 - (t * 30);
+          saturation = 92 - (t * 15);
+          lightness = 55 - (t * 18);
+      }
+      
+      container.style.setProperty('--heart-color', `hsl(${hue}, ${saturation}%, ${lightness}%)`);
+      
+      // 生成10颗爱心
+      for (let i = 1; i <= 10; i++) {
+          const heart = document.createElement('span');
+          heart.className = 'npcpv-heart';
+          heart.title = `第 ${i} 级 · ${i * 10} 点好感`;
+          
+          if (i <= filledCount) {
+              heart.classList.add('filled');
+              heart.innerHTML = '❤'; // 【核心修复】：统一改为单个标准的纯文本实心爱心字符
+          } else {
+              heart.classList.add('empty');
+              heart.innerHTML = '❤'; // 【核心修复】：统一改为单个实心字符，靠CSS的 .empty 渲染为灰色
+          }
+          
+          heartsContainer.appendChild(heart);
+      }
+      
+      const valueSpan = document.createElement('span');
+      valueSpan.className = 'npcpv-affval';
+      valueSpan.textContent = `${Math.floor(clamped)}`;
+      
+      container.appendChild(heartsContainer);
+      container.appendChild(valueSpan);
+      
+      return container;
+  }
+
   function statusOf(st) {
     const found = STATUSES.find(s => s[0] === st);
     return found || STATUSES[0];
