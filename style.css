@@ -548,3 +548,13 @@
   .npcpv-dialog-actions { flex-wrap: wrap; }
   .npcpv-import-row { grid-template-columns: 1fr; }
 }
+  .npcpv-profile { 
+      flex-direction: row !important;
+      align-items: center !important; 
+      gap: 10px !important;
+  }
+  .npcpv-big-avatar { 
+      width: 60px !important; 
+      height: 60px !important; 
+      flex-shrink: 0; 
+  }
