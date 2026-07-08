@@ -513,7 +513,7 @@
   }
   
   .npcpv-header { height: auto; min-height: 0; flex: 0 0 auto; align-items: flex-start; flex-direction: column; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; gap: 8px; }
-  .npcpv-title { width: 100%; justify-content: space-between; font-size: 15px; padding-right: 32px; box-sizing: border-box; }
+  .npcpv-title { width: 100%; justify-content: space-between; font-size: 15px; }
   .npcpv-actions { width: 100%; flex-wrap: nowrap; justify-content: flex-start; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
   .npcpv-btn { flex: 0 0 auto; padding: 7px 9px; font-size: 12px; }
   .npcpv-close { position: absolute; top: 8px; right: 10px; }
