@@ -257,15 +257,15 @@
       // 颜色序列：灰 -> 蓝 -> 青 -> 绿 -> 黄 -> 粉 -> 紫 -> 橙 -> 玫红 -> 正红
       const colors = [
           '#9e9e9e', // 0-10: 灰
-          '#A4DED', // 10-20: 蓝
-          '#BDE0FE', // 20-30: 青
-          '#B9FBC0', // 30-40: 绿
-          '#FBF8CC', // 40-50: 黄
+          '#BDE0FE', // 10-20: 蓝
+          '#B9FBC0', // 20-30: 青
+          '#FBF8CC', // 30-40: 绿
+          '#FFCFD2', // 40-50: 黄
           '#FFC8DD', // 50-60: 粉
           '#CDB4DB', // 60-70: 紫
-          '#FFB5A7', // 70-80: 橙
-          '#FFCFD2', // 80-90: 玫红
-          '#BC4749'  // 90-100: 正红
+          '#FEC89A', // 70-80: 橙
+          '#FF4D6D', // 80-90: 玫红
+          '#DA2C38'  // 90-100: 正红
       ];
 
       // 根据当前好感度区间取色
@@ -587,7 +587,7 @@ const heartHtml = heartDom.outerHTML;
     
     root.innerHTML = `<div class="npcpv-root ${viewClass}" style="${styleAttr}"><div class="npcpv-modal">
       <div class="npcpv-header">
-         <div class="npcpv-title">NPC 面板 <span class="npcpv-mode">状态变量</span></div>
+         <div class="npcpv-title">NPC 面板 <span class="npcpv-mode">🫐</span></div>
          <div class="npcpv-actions">
            <button class="npcpv-btn primary" data-action="api-settings">🔌 API与更新</button>
            <button class="npcpv-btn danger" data-action="clear-all">清空</button>
