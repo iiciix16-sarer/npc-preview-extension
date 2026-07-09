@@ -194,8 +194,6 @@
     list: function() { return registry().map(r => r.name); }
   };
 
-
-
   function showToast(msg) {
     const t = document.createElement('div');
     t.className = 'npcpv-toast';
@@ -237,27 +235,15 @@
   }
 
  function affectionColor(aff) {
-    // 1. 先处理负好感度（保留原有逻辑）
     if (aff < -50) return '#d32f2f'; // 极低好感 深红
     if (aff < 0) return '#ff9800';   // 负好感 橙色
 
-    // 2. 处理 0~100 的正好感度（同步 11 种爱心颜色状态）
     const clamped = Math.max(0, Math.min(100, Number(aff) || 0));
     const colors = [
-        '#9e9e9e', // 0-9: 灰
-        '#BDE0FE', // 10-19: 蓝
-        '#B9FBC0', // 20-29: 青
-        '#FBF8CC', // 30-39: 绿
-        '#FFCFD2', // 40-49: 黄
-        '#FFC8DD', // 50-59: 粉
-        '#FCA311', // 60-69: 橙
-        '#CDB4DB', // 70-79: 紫
-        '#F26A8D', // 80-89: 玫红
-        '#E63946', // 90-99: 亮红 
-        '#880D1E'  // 100: 正红/深红
+        '#9e9e9e', '#BDE0FE', '#B9FBC0', '#FBF8CC', '#FFCFD2', 
+        '#FFC8DD', '#FCA311', '#CDB4DB', '#F26A8D', '#E63946', '#880D1E'
     ];
     
-    // 计算对应的颜色索引
     const index = Math.min(Math.floor(clamped / 10), 10);
     return colors[index];
   }
@@ -273,17 +259,8 @@
       const filledCount = Math.floor(clamped / 10);
       
       const colors = [
-          '#9e9e9e', // 0-9: 灰
-          '#BDE0FE', // 10-19: 蓝
-          '#B9FBC0', // 20-29: 青
-          '#FBF8CC', // 30-39: 绿
-          '#FFCFD2', // 40-49: 黄
-          '#FFC8DD', // 50-59: 粉
-          '#FCA311', // 60-69: 橙
-          '#CDB4DB', // 70-79: 紫
-          '#F26A8D', // 80-89: 玫红
-          '#E63946', // 90-99: 亮红 
-          '#880D1E'  // 100: 正红/深红 
+          '#9e9e9e', '#BDE0FE', '#B9FBC0', '#FBF8CC', '#FFCFD2', 
+          '#FFC8DD', '#FCA311', '#CDB4DB', '#F26A8D', '#E63946', '#880D1E'
       ];
 
       const index = Math.min(Math.floor(clamped / 10), 10);
@@ -323,7 +300,7 @@
  function relationGraphHtml(selected) {
     const names = registry().map(r => r.name);
     
-    // 修复：获取当前酒馆的玩家名字（SillyTavern中通常为 window.name1），并将常用代词加入白名单
+    // 修复：获取当前酒馆的玩家名字，并将常用代词加入白名单
     const userName = (window.name1 || 'User').toLowerCase();
     const playerAliases = ['user', '玩家', '主角', '我', '你', userName];
 
@@ -407,8 +384,9 @@
         targetUrl = targetUrl.replace(/\/+$/, '') + '/chat/completions';
     }
 
+    // 修复：添加备忘录的提取提示
     const systemPrompt = `你是NPC状态判定器。仅输出纯JSON数组，绝对不要有任何解释或markdown格式。
-数组对象允许使用中文或对应英文键名：NPC名称(name), 势力(faction), 身份(identity), 好感度(affection, 必须是数字), 状态(status: online/offline/away/danger/missing), 心情(mood: calm/happy/angry/sad/love/fear/excited/shy/guilty/cold), 备注(notes), 首次登场(first_seen), 登场事件(first_event), NPC关系(relations)。
+数组对象允许使用中文或对应英文键名：NPC名称(name), 势力(faction), 身份(identity), 好感度(affection, 必须是数字), 状态(status: online/offline/away/danger/missing), 心情(mood: calm/happy/angry/sad/love/fear/excited/shy/guilty/cold), 备注(notes), 备忘录(memo: 记录从近期对话中发现的该NPC待办事项或目的), 首次登场(first_seen), 登场事件(first_event), NPC关系(relations)。
 【极其重要】：NPC关系(relations) 字段必须严格使用"名字(关系标签)"格式，并用顿号或逗号分隔。例如："李四(挚友)、王五(宿敌)"。
 若某NPC未在近期被提及，不要返回。`;
     
@@ -458,6 +436,19 @@
           if (!npcName) continue;
           
           if (currentBlacklist.includes(npcName)) continue;
+          
+          // 修复：处理 AI 提取的新备忘录（采用追加模式）
+          let aiMemo = item['备忘录'] || item['memo'];
+          let finalMemo = undefined;
+          
+          if (aiMemo) {
+              const oldMemo = window.NPCPreviewAPI.getValue(npcName, '备忘录') || '';
+              if (!oldMemo.includes(aiMemo)) {
+                  const now = new Date();
+                  const timeStr = `${now.getMonth()+1}月${now.getDate()}日 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} [AI追加] - `;
+                  finalMemo = timeStr + aiMemo + (oldMemo ? '\n' + oldMemo : '');
+              }
+          }
 
           window.NPCPreviewAPI.update(npcName, {
              '势力': item['势力'] || item['faction'],
@@ -466,6 +457,7 @@
              '状态': item['状态'] || item['status'],
              '心情': item['心情'] || item['mood'],
              '备注': item['备注'] || item['notes'] || item['note'],
+             '备忘录': finalMemo,
              '首次登场': item['首次登场'] || item['first_seen'],
              '登场事件': item['登场事件'] || item['first_event'],
              '关系': item['NPC关系'] || item['relations'] || item['relation']
@@ -699,14 +691,20 @@
     bindInput('notes', '备注');
     bindInput('memo', '备忘录');
     
+    // 修复：优化时间插入防止失去焦点和重绘卡顿
     root.querySelector('[data-action="add-memo-time"]')?.addEventListener('click', () => {
         const textarea = root.querySelector('[data-action="memo"]');
         if (textarea) {
             const now = new Date();
             const timeStr = `${now.getMonth()+1}月${now.getDate()}日 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} - `;
             textarea.value = timeStr + textarea.value;
-            writeField(selected, '备忘录', textarea.value);
+            
+            const key = keyName(selected['NPC名称']);
+            setVarSync(VAR_PREFIX + key + '_备忘录', textarea.value);
+            loadRowsSync();
+            
             textarea.focus();
+            textarea.setSelectionRange(timeStr.length, timeStr.length);
         }
     });
     
