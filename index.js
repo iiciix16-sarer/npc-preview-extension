@@ -95,6 +95,11 @@
   function extras() { return parse(localStorage.getItem(ctxKey(EXTRA_PREFIX)) || '{}', {}); }
   function saveExtras(value) { localStorage.setItem(ctxKey(EXTRA_PREFIX), JSON.stringify(value)); }
 
+  // ==== 新增：黑名单数据管理 ====
+  function getBlacklist() { return parse(localStorage.getItem(ctxKey('npc_preview_blacklist_')) || '[]', []); }
+  function saveBlacklist(list) { localStorage.setItem(ctxKey('npc_preview_blacklist_'), JSON.stringify(list)); }
+  // ============================
+
   function defaultSettings() {
     return { 
       x: null, y: null, color: '#43a047', text: 'NPC', size: 46, 
@@ -145,6 +150,7 @@
           '首次登场': getVarSync(VAR_PREFIX + key + '_初见', ''),
           '登场事件': getVarSync(VAR_PREFIX + key + '_事件', ''),
           'NPC关系': getVarSync(VAR_PREFIX + key + '_关系', ''),
+          '备忘录': getVarSync(VAR_PREFIX + key + '_备忘录', ''),
           '好感历史': getVarSync(VAR_PREFIX + key + '_历史', '[]')
        };
     },
@@ -155,7 +161,7 @@
        if(keyAttr === '势力') return reg.faction;
        if(keyAttr === '身份') return reg.identity;
        
-       const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', 'NPC关系': '_关系' };
+       const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', 'NPC关系': '_关系', '备忘录': '_备忘录' };
        const suffix = attrMap[keyAttr];
        if(!suffix) return '';
        return getVarSync(VAR_PREFIX + keyName(name) + suffix, keyAttr==='好感度'?0:'');
@@ -173,7 +179,7 @@
        saveRegistry(reg);
        
        const key = keyName(name);
-       const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', 'NPC关系': '_关系', '关系': '_关系' };
+       const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', 'NPC关系': '_关系', '关系': '_关系', '备忘录': '_备忘录' };
        for(let k in attrMap) {
           if(dataObj[k] !== undefined && dataObj[k] !== null && dataObj[k] !== '') {
               setVarSync(VAR_PREFIX + key + attrMap[k], dataObj[k]);
@@ -230,7 +236,6 @@
      return links;
   }
 
-  // 计算好感度颜色的辅助函数 (原代码中似乎漏了这个定义，我补充一个简单的渐变器防止报错)
   function affectionColor(aff) {
     if (aff > 50) return '#e91e63'; // 高好感 粉红
     if (aff > 0) return '#4caf50';  // 正好感 绿色
@@ -238,11 +243,7 @@
     if (aff < 0) return '#ff9800';  // 负好感 橙色
     return '#9e9e9e'; // 0
   }
-/**
- * 创建平滑渐变爱心好感条
- * @param {number} affinity - 当前好感度 (0-100)
- * @returns {HTMLElement} 好感条容器
- */
+
   function createAffinityHearts(affinity = 0) {
       const container = document.createElement('div');
       container.className = 'npcpv-aff';
@@ -253,8 +254,6 @@
       const clamped = Math.max(0, Math.min(100, Number(affinity) || 0));
       const filledCount = Math.floor(clamped / 10);
       
-       // ==================== 自定义颜色序列逻辑 ====================
-      // 颜色序列：灰 -> 蓝 -> 青 -> 绿 -> 黄 -> 粉 -> 紫 -> 橙 -> 玫红 -> 正红
       const colors = [
           '#9e9e9e', // 0-10: 灰
           '#BDE0FE', // 10-20: 蓝
@@ -268,11 +267,9 @@
           '#880D1E'  // 90-100: 正红
       ];
 
-      // 根据当前好感度区间取色
       const index = Math.min(Math.floor(clamped / 10), 9);
       container.style.setProperty('--heart-color', colors[index]);
 
-      // 生成10颗爱心
       for (let i = 1; i <= 10; i++) {
           const heart = document.createElement('span');
           heart.className = 'npcpv-heart';
@@ -280,10 +277,10 @@
           
           if (i <= filledCount) {
               heart.classList.add('filled');
-              heart.innerHTML = '❤'; // 【核心修复】：统一改为单个标准的纯文本实心爱心字符
+              heart.innerHTML = '❤'; 
           } else {
               heart.classList.add('empty');
-              heart.innerHTML = '❤'; // 【核心修复】：统一改为单个实心字符，靠CSS的 .empty 渲染为灰色
+              heart.innerHTML = '❤'; 
           }
           
           heartsContainer.appendChild(heart);
@@ -377,7 +374,6 @@
 
     if(!isSilent) toggleLoading(true, '剧情扫描中,请稍候...');
 
-    // 【核心修复】：自动检测并补全 '/chat/completions' 路径
     let targetUrl = cfg.apiUrl.trim();
     if (!targetUrl.endsWith('/chat/completions')) {
         targetUrl = targetUrl.replace(/\/+$/, '') + '/chat/completions';
@@ -389,7 +385,6 @@
 若某NPC未在近期被提及，不要返回。`;
     
     try {
-       // 这里使用拼接好的 targetUrl 
        const res = await fetch(targetUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey}` },
@@ -406,7 +401,6 @@
       if (!res.ok) {
            const errText = await res.text();
            console.error('[NPC预览表] API 请求失败:', res.status, errText);
-           // 新增：直接在手机屏幕上弹窗显示 API 接口的详细报错
            if (!isSilent) alert(`API 请求失败 (HTTP ${res.status})\n\n错误详情:\n${errText.substring(0, 300)}`);
            throw new Error(`HTTP ${res.status}`);
        }
@@ -421,7 +415,6 @@
       } catch(e) { 
            console.error('[NPC预览表] JSON解析失败，大模型返回的原文是:', responseText);
            if(!isSilent) {
-               // 新增：直接弹窗展示大模型原本吐出来的完整文本，方便你检查到底哪里没对齐格式
                alert(`AI返回格式有误，解析失败！\n\n大模型实际返回的原文是：\n\n${responseText.substring(0, 600)}`);
            }
            toggleLoading(false); return; 
@@ -430,9 +423,13 @@
        if(!Array.isArray(list)) { toggleLoading(false); return; }
        
        let count = 0;
+       const currentBlacklist = getBlacklist();
+       
        for (const item of list) {
           const npcName = item['NPC名称'] || item['name'] || item['npc_name'];
           if (!npcName) continue;
+          
+          if (currentBlacklist.includes(npcName)) continue;
 
           window.NPCPreviewAPI.update(npcName, {
              '势力': item['势力'] || item['faction'],
@@ -474,6 +471,7 @@
         '首次登场': getVarSync(VAR_PREFIX + key + '_初见', ''),
         '登场事件': getVarSync(VAR_PREFIX + key + '_事件', ''),
         'NPC关系': getVarSync(VAR_PREFIX + key + '_关系', ''),
+        '备忘录': getVarSync(VAR_PREFIX + key + '_备忘录', ''),
         '历史': parseHistory(getVarSync(VAR_PREFIX + key + '_历史', '[]'))
       });
     }
@@ -491,7 +489,7 @@
         saveRegistry(reg);
      }
      
-     const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', '关系': '_关系' };
+     const attrMap = { '好感度': '_好感', '状态': '_状态', '心情': '_心情', '备注': '_备注', '首次登场': '_初见', '登场事件': '_事件', '关系': '_关系', '备忘录': '_备忘录' };
      if(attrMap[field]) setVarSync(VAR_PREFIX + key + attrMap[field], value);
      
      if (field === '好感度') {
@@ -542,12 +540,11 @@
 
   function detailHtml(row) {
     const name = row['NPC名称'] || '?';
-const aff = Number(row['好感度']) || 0;
-const avatar = avatars()[name];
-const heartDom = createAffinityHearts(aff);
-const heartHtml = heartDom.outerHTML;
+    const aff = Number(row['好感度']) || 0;
+    const avatar = avatars()[name];
+    const heartDom = createAffinityHearts(aff);
+    const heartHtml = heartDom.outerHTML;
 
-    
     return `<button class="npcpv-btn npcpv-back-btn" data-action="back-to-list">⬅ 返回名册</button>
     <div class="npcpv-profile"><div class="npcpv-big-avatar" data-action="avatar">${avatar ? `<img src="${avatar}">` : esc(name[0] || '?')}<span>换头像</span></div><div class="npcpv-profile-text"><div class="npcpv-main-name">${esc(name)}</div><div class="npcpv-main-sub">${esc(row['势力'] || '未分组')}</div><div class="npcpv-main-sub long">${esc(row['身份'] || '')}</div></div></div>
     
@@ -571,6 +568,14 @@ const heartHtml = heartDom.outerHTML;
     
     <div class="npcpv-section"><div class="npcpv-label">首次登场</div><input class="npcpv-input" data-action="first-seen" value="${esc(row['首次登场'] || '')}" placeholder="第X章 / 某地点"></div>
     <div class="npcpv-section"><div class="npcpv-label">登场事件</div><textarea class="npcpv-textarea" data-action="first-event" placeholder="记录如何相遇的">${esc(row['登场事件'] || '')}</textarea></div>
+    
+    <div class="npcpv-section">
+      <div class="npcpv-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>📝 备忘录 <span class="npcpv-small">（待办/已办事项）</span></span>
+          <button class="npcpv-chip" data-action="add-memo-time" style="margin:0; padding:2px 6px;">+ 插入当前时间</button>
+      </div>
+      <textarea class="npcpv-textarea" data-action="memo" placeholder="例如：7月8日 10:00 [未完成] 寻找丢失的怀表...">${esc(row['备忘录'] || '')}</textarea>
+    </div>
     <div class="npcpv-section"><div class="npcpv-label">个人私密备注</div><textarea class="npcpv-textarea" data-action="notes" placeholder="记录密码、弱点、未公开情报">${esc(row['备注'] || '')}</textarea></div>
     
     <div class="npcpv-ctrls" style="margin-top:20px;border-top:1px solid #dcebdc;padding-top:14px;"><button class="npcpv-btn danger" data-action="delete">抹除该NPC</button></div>`;
@@ -590,6 +595,7 @@ const heartHtml = heartDom.outerHTML;
          <div class="npcpv-title">NPC 面板 <span class="npcpv-mode">🫐</span></div>
          <div class="npcpv-actions">
            <button class="npcpv-btn primary" data-action="api-settings">🔌 API与更新</button>
+           <button class="npcpv-btn" data-action="blacklist">🚫 黑名单</button>
            <button class="npcpv-btn danger" data-action="clear-all">清空</button>
            <button class="npcpv-close" data-action="close">×</button>
          </div>
@@ -617,6 +623,7 @@ const heartHtml = heartDom.outerHTML;
     root.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => { selectedId = null; render(); });
     root.querySelector('[data-action="clear-all"]')?.addEventListener('click', () => { if(confirm('彻底抹除所有NPC变量？')) { saveRegistry([]); loadRowsSync(); render(); } });
     root.querySelector('[data-action="api-settings"]')?.addEventListener('click', showApiDocsDialog);
+    root.querySelector('[data-action="blacklist"]')?.addEventListener('click', showBlacklistDialog);
     
     root.querySelector('[data-action="search"]')?.addEventListener('input', e => { query = e.target.value; render(); });
     root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; render(); }));
@@ -635,7 +642,6 @@ const heartHtml = heartDom.outerHTML;
       card.addEventListener('drop', e => { e.preventDefault(); reorderNpc(e.dataTransfer.getData('text/plain'), card.dataset.id); });
     });
     
-    // Wiki式穿透点击跳转
     root.querySelectorAll('.npcpv-node.clickable').forEach(node => {
       node.addEventListener('click', () => {
          const tName = node.getAttribute('data-npc');
@@ -663,9 +669,26 @@ const heartHtml = heartDom.outerHTML;
     bindInput('first-event', '登场事件');
     bindInput('relations', '关系');
     bindInput('notes', '备注');
+    bindInput('memo', '备忘录');
+    
+    root.querySelector('[data-action="add-memo-time"]')?.addEventListener('click', () => {
+        const textarea = root.querySelector('[data-action="memo"]');
+        if (textarea) {
+            const now = new Date();
+            const timeStr = `${now.getMonth()+1}月${now.getDate()}日 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} - `;
+            textarea.value = timeStr + textarea.value;
+            writeField(selected, '备忘录', textarea.value);
+            textarea.focus();
+        }
+    });
     
     root.querySelector('[data-action="delete"]')?.addEventListener('click', () => { 
-        if (confirm('确认抹除该NPC所有记录？')) {
+        if (confirm('确认抹除该NPC所有记录？\n\n注意：删除后该NPC将自动加入【黑名单】，AI将再也无法将其读取出来。')) {
+           const bl = getBlacklist();
+           if (!bl.includes(selected['NPC名称'])) {
+               bl.push(selected['NPC名称']);
+               saveBlacklist(bl);
+           }
            saveRegistry(registry().filter(n => String(n.id) !== String(selected.id)));
            selectedId = null; loadRowsSync(); render();
         } 
@@ -814,6 +837,46 @@ const heartHtml = heartDom.outerHTML;
   }
   function closeSubDialog() { document.getElementById('npcpv-subdialog')?.remove(); }
 
+  // ==== 新增：显示黑名单管理界面 ====
+  function showBlacklistDialog() {
+    const bl = getBlacklist();
+    const listHtml = bl.length === 0 ? '<div class="npcpv-empty compact" style="margin-top:20px;">黑名单空空如也</div>' : 
+        bl.map((name, i) => `
+        <div class="npcpv-import-row" style="display:flex; justify-content:space-between; align-items:center;">
+            <b>${esc(name)}</b>
+            <button class="npcpv-btn danger" data-remove-bl="${i}" style="padding:4px 8px;">移出黑名单</button>
+        </div>`).join('');
+
+    showSubDialog(`
+      <h3>🚫 NPC 黑名单管理</h3>
+      <div class="npcpv-doc-desc" style="margin-bottom:10px;">被拉黑的 NPC 在 AI 自动扫描时会被彻底无视。<br>💡 提示：在面板中点击“抹除该NPC”即可将其拉黑，而点击“清空”按钮不会触发拉黑。</div>
+      
+      <div class="npcpv-import-preview" id="npcpv-blacklist-container">
+        ${listHtml}
+      </div>
+      
+      <div class="npcpv-dialog-actions" style="margin-top:20px;">
+        <button class="npcpv-btn primary" data-subclose="1">完成</button>
+      </div>
+    `, () => {
+      document.getElementById('npcpv-blacklist-container')?.addEventListener('click', (e) => {
+          const idx = e.target.getAttribute('data-remove-bl');
+          if (idx !== null) {
+              let currentBl = getBlacklist();
+              currentBl.splice(idx, 1);
+              saveBlacklist(currentBl);
+              e.target.closest('.npcpv-import-row').remove();
+              
+              if (currentBl.length === 0) {
+                  document.getElementById('npcpv-blacklist-container').innerHTML = '<div class="npcpv-empty compact" style="margin-top:20px;">黑名单空空如也</div>';
+              }
+              showToast('已从黑名单中解封');
+          }
+      });
+    });
+  }
+  // ============================
+
   function uploadAvatar(item) {
     const input = document.createElement('input');
     input.type = 'file'; input.accept = 'image/*';
@@ -894,11 +957,10 @@ const heartHtml = heartDom.outerHTML;
     btn.style.left = x + 'px'; btn.style.top = y + 'px'; btn.style.right = 'auto'; btn.style.bottom = 'auto';
   }
 
-function applyButtonSettings() {
+  function applyButtonSettings() {
     const btn = document.getElementById(BUTTON_ID);
     const cfg = buttonSettings();
     if (btn) {
-        // 如果按钮当前处于同步状态，则跳过背景更新以避免冲突
         if (btn.dataset.syncing !== 'true') {
             btn.style.background = cfg.color || '#43a047';
         }
@@ -913,23 +975,17 @@ function applyButtonSettings() {
     const btn = document.getElementById(BUTTON_ID);
     if (!btn) return;
     if (isSyncing) {
-        // 存储原始背景颜色，如果尚未存储的话
         if (!btn.dataset.originalBackground) {
             btn.dataset.originalBackground = btn.style.background || '';
         }
-        // 设置同步状态数据属性
         btn.dataset.syncing = 'true';
-        // 设置同步颜色 - 使用与手动同步按钮相同的蓝色
         btn.style.background = '#1976d2';
     } else {
-        // 恢复原始背景颜色
         const original = btn.dataset.originalBackground;
         if (original !== undefined) {
             btn.style.background = original;
-            // 清除数据属性以避免泄漏
             delete btn.dataset.originalBackground;
         }
-        // 删除同步状态数据属性
         delete btn.dataset.syncing;
     }
   }
@@ -994,9 +1050,8 @@ function applyButtonSettings() {
 
   function updateViewportVars() { document.documentElement.style.setProperty('--npcpv-vw', window.innerWidth+'px'); document.documentElement.style.setProperty('--npcpv-vh', window.innerHeight+'px'); }
 
-function boot() {
+  function boot() {
       updateViewportVars(); ensureButton(); keepButtonVisible(); loadRowsSync();
-      // 绑定聊天完成事件以自动同步NPC状态
       if (window.eventSource && !window._npcpv_event_bound) {
           window._npcpv_event_bound = true;
           window.eventSource.on('chat_completion', () => {
