@@ -236,12 +236,30 @@
      return links;
   }
 
-  function affectionColor(aff) {
-    if (aff > 50) return '#e91e63'; // 高好感 粉红
-    if (aff > 0) return '#4caf50';  // 正好感 绿色
-    if (aff < -50) return '#d32f2f';// 极低好感 深红
-    if (aff < 0) return '#ff9800';  // 负好感 橙色
-    return '#9e9e9e'; // 0
+ function affectionColor(aff) {
+    // 1. 先处理负好感度（保留原有逻辑）
+    if (aff < -50) return '#d32f2f'; // 极低好感 深红
+    if (aff < 0) return '#ff9800';   // 负好感 橙色
+
+    // 2. 处理 0~100 的正好感度（同步 11 种爱心颜色状态）
+    const clamped = Math.max(0, Math.min(100, Number(aff) || 0));
+    const colors = [
+        '#9e9e9e', // 0-9: 灰
+        '#BDE0FE', // 10-19: 蓝
+        '#B9FBC0', // 20-29: 青
+        '#FBF8CC', // 30-39: 绿
+        '#FFCFD2', // 40-49: 黄
+        '#FFC8DD', // 50-59: 粉
+        '#FCA311', // 60-69: 橙
+        '#CDB4DB', // 70-79: 紫
+        '#F26A8D', // 80-89: 玫红
+        '#E63946', // 90-99: 亮红 
+        '#880D1E'  // 100: 正红/深红
+    ];
+    
+    // 计算对应的颜色索引
+    const index = Math.min(Math.floor(clamped / 10), 10);
+    return colors[index];
   }
 
   function createAffinityHearts(affinity = 0) {
@@ -255,19 +273,20 @@
       const filledCount = Math.floor(clamped / 10);
       
       const colors = [
-          '#9e9e9e', // 0-10: 灰
-          '#BDE0FE', // 10-20: 蓝
-          '#B9FBC0', // 20-30: 青
-          '#FBF8CC', // 30-40: 绿
-          '#FFCFD2', // 40-50: 黄
-          '#FFC8DD', // 50-60: 粉
-          '#FCA311', // 60-70: 紫
-          '#CDB4DB', // 70-80: 橙
-          '#F26A8D', // 80-90: 玫红
-          '#880D1E'  // 90-100: 正红
+          '#9e9e9e', // 0-9: 灰
+          '#BDE0FE', // 10-19: 蓝
+          '#B9FBC0', // 20-29: 青
+          '#FBF8CC', // 30-39: 绿
+          '#FFCFD2', // 40-49: 黄
+          '#FFC8DD', // 50-59: 粉
+          '#FCA311', // 60-69: 橙
+          '#CDB4DB', // 70-79: 紫
+          '#F26A8D', // 80-89: 玫红
+          '#E63946', // 90-99: 亮红 
+          '#880D1E'  // 100: 正红/深红 
       ];
 
-      const index = Math.min(Math.floor(clamped / 10), 9);
+      const index = Math.min(Math.floor(clamped / 10), 10);
       container.style.setProperty('--heart-color', colors[index]);
 
       for (let i = 1; i <= 10; i++) {
