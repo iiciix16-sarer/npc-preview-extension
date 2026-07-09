@@ -320,11 +320,20 @@
     return found || STATUSES[0];
   }
 
-  function relationGraphHtml(selected) {
+ function relationGraphHtml(selected) {
     const names = registry().map(r => r.name);
+    
+    // 修复：获取当前酒馆的玩家名字（SillyTavern中通常为 window.name1），并将常用代词加入白名单
+    const userName = (window.name1 || 'User').toLowerCase();
+    const playerAliases = ['user', '玩家', '主角', '我', '你', userName];
+
     const relText = getVarSync(VAR_PREFIX + keyName(selected['NPC名称']) + '_关系', '');
     const links = parseRelations(relText);
-    const validLinks = links.filter(l => names.includes(l.name)).slice(0, 8);
+    
+    // 修复：除了存在于名册内的 NPC 外，允许白名单内的玩家称呼通过过滤
+    const validLinks = links.filter(l => 
+        names.includes(l.name) || playerAliases.includes(String(l.name).toLowerCase())
+    ).slice(0, 8);
     
     if (!validLinks.length) return '<div class="npcpv-empty compact">暂无网状关系。<br>由AI自动记录，或输入：名字(关系)</div>';
     
