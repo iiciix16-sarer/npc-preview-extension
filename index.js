@@ -68,6 +68,11 @@
   let panelH = null;
   let panelDrag = null;
 
+  // ==== 修复：加入状态记忆，防止重绘时发生跳跃和光标丢失 ====
+  let savedDetailScroll = 0;
+  let savedCardsScroll = 0;
+  let lastRenderedId = null;
+
   function ctxKey(prefix) {
     try {
       const ctx = window.SillyTavern?.getContext?.();
@@ -95,10 +100,8 @@
   function extras() { return parse(localStorage.getItem(ctxKey(EXTRA_PREFIX)) || '{}', {}); }
   function saveExtras(value) { localStorage.setItem(ctxKey(EXTRA_PREFIX), JSON.stringify(value)); }
 
-  // ==== 新增：黑名单数据管理 ====
   function getBlacklist() { return parse(localStorage.getItem(ctxKey('npc_preview_blacklist_')) || '[]', []); }
   function saveBlacklist(list) { localStorage.setItem(ctxKey('npc_preview_blacklist_'), JSON.stringify(list)); }
-  // ============================
 
   function defaultSettings() {
     return { 
@@ -235,8 +238,8 @@
   }
 
  function affectionColor(aff) {
-    if (aff < -50) return '#d32f2f'; // 极低好感 深红
-    if (aff < 0) return '#ff9800';   // 负好感 橙色
+    if (aff < -50) return '#d32f2f';
+    if (aff < 0) return '#ff9800';
 
     const clamped = Math.max(0, Math.min(100, Number(aff) || 0));
     const colors = [
@@ -300,14 +303,12 @@
  function relationGraphHtml(selected) {
     const names = registry().map(r => r.name);
     
-    // 修复：获取当前酒馆的玩家名字，并将常用代词加入白名单
     const userName = (window.name1 || 'User').toLowerCase();
     const playerAliases = ['user', '玩家', '主角', '我', '你', userName];
 
     const relText = getVarSync(VAR_PREFIX + keyName(selected['NPC名称']) + '_关系', '');
     const links = parseRelations(relText);
     
-    // 修复：除了存在于名册内的 NPC 外，允许白名单内的玩家称呼通过过滤
     const validLinks = links.filter(l => 
         names.includes(l.name) || playerAliases.includes(String(l.name).toLowerCase())
     ).slice(0, 8);
@@ -384,7 +385,6 @@
         targetUrl = targetUrl.replace(/\/+$/, '') + '/chat/completions';
     }
 
-    // 修复：添加备忘录的提取提示
     const systemPrompt = `你是NPC状态判定器。仅输出纯JSON数组，绝对不要有任何解释或markdown格式。
 数组对象允许使用中文或对应英文键名：NPC名称(name), 势力(faction), 身份(identity), 好感度(affection, 必须是数字), 状态(status: online/offline/away/danger/missing), 心情(mood: calm/happy/angry/sad/love/fear/excited/shy/guilty/cold), 备注(notes), 备忘录(memo: 记录从近期对话中发现的该NPC待办事项或目的), 首次登场(first_seen), 登场事件(first_event), NPC关系(relations)。
 【极其重要】：NPC关系(relations) 字段必须严格使用"名字(关系标签)"格式，并用顿号或逗号分隔。例如："李四(挚友)、王五(宿敌)"。
@@ -437,7 +437,6 @@
           
           if (currentBlacklist.includes(npcName)) continue;
           
-          // 修复：处理 AI 提取的新备忘录（采用追加模式）
           let aiMemo = item['备忘录'] || item['memo'];
           let finalMemo = undefined;
           
@@ -498,7 +497,8 @@
     rows = result.sort((a, b) => (ex[a['NPC名称']]?.order ?? 999) - (ex[b['NPC名称']]?.order ?? 999));
   }
 
-  function writeField(row, field, value) {
+  // ==== 修复：加入 isSilent 参数，允许静默保存数据而不引起重新渲染跳变 ====
+  function writeField(row, field, value, isSilent = false) {
      const key = keyName(row['NPC名称']);
      const reg = registry();
      const item = reg.find(n => n.name === row['NPC名称']);
@@ -519,7 +519,7 @@
      }
      
      loadRowsSync();
-     render();
+     if (!isSilent) render(); // 如果是静默保存（如文本框输入），就跳过重绘 UI，避免失去焦点
   }
 
   function toggleGroup(name) {
@@ -601,12 +601,35 @@
     <div class="npcpv-ctrls" style="margin-top:20px;border-top:1px solid #dcebdc;padding-top:14px;"><button class="npcpv-btn danger" data-action="delete">抹除该NPC</button></div>`;
   }
 
+  // ==== 修复：加入渲染前后的状态记录与恢复机制 ====
   function render() {
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
     const selected = rows.find(r => String(r.id) === String(selectedId));
-    const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力'] || '未分组').filter(Boolean))).sort()];
     
+    // --- 【关键1】在摧毁旧DOM前，记录各种状态 ---
+    if (selectedId !== lastRenderedId) {
+        savedDetailScroll = 0; // 如果切换了NPC，右侧详情滚回顶部
+    } else {
+        const oldDetail = root.querySelector('.npcpv-detail');
+        if (oldDetail) savedDetailScroll = oldDetail.scrollTop;
+    }
+    const oldCards = root.querySelector('.npcpv-cards');
+    if (oldCards) savedCardsScroll = oldCards.scrollTop;
+    
+    // 专门记忆搜索框的光标
+    const oldSearch = root.querySelector('.npcpv-search');
+    const searchHasFocus = oldSearch && (document.activeElement === oldSearch);
+    let searchSelStart = 0, searchSelEnd = 0;
+    if (searchHasFocus) {
+        searchSelStart = oldSearch.selectionStart;
+        searchSelEnd = oldSearch.selectionEnd;
+    }
+    
+    lastRenderedId = selectedId;
+    // ------------------------------------
+
+    const factions = ['全部', ...Array.from(new Set(rows.map(r => r['势力'] || '未分组').filter(Boolean))).sort()];
     const styleAttr = `width:${panelW ? panelW + 'px' : 'min(860px, 92vw)'}; height:${panelH ? panelH + 'px' : 'min(680px, 88vh)'}; left:${panelX}px; top:${panelY}px; transform: none !important; margin: 0;`;
     const viewClass = selected ? 'view-detail' : 'view-list';
     
@@ -630,6 +653,22 @@
       </div>
       <div id="npcpv-loading" class="npcpv-loading-overlay"><div class="npcpv-spinner"></div><div class="npcpv-loading-text">正在分析剧情...</div></div>
     </div></div>`;
+    
+    // --- 【关键2】立刻在生成的新DOM上还原状态 ---
+    const newDetail = root.querySelector('.npcpv-detail');
+    const newCards = root.querySelector('.npcpv-cards');
+    if (newDetail) newDetail.scrollTop = savedDetailScroll;
+    if (newCards) newCards.scrollTop = savedCardsScroll;
+    
+    // 恢复搜索框的焦点和打字进度
+    if (searchHasFocus) {
+        const newSearch = root.querySelector('.npcpv-search');
+        if (newSearch) {
+            newSearch.focus();
+            try { newSearch.setSelectionRange(searchSelStart, searchSelEnd); } catch(e){}
+        }
+    }
+    // ------------------------------------
     
     applyPanelTheme(root);
     bindEvents(root);
@@ -672,6 +711,8 @@
     });
 
     if (!selected) return;
+    
+    // 按钮/下拉框等依然允许重绘，但由于上面的状态记忆，不再跳变
     root.querySelectorAll('[data-action="aff"]').forEach(btn => btn.addEventListener('click', () => writeField(selected, '好感度', Math.max(-100, Math.min(100, (Number(selected['好感度']) || 0) + Number(btn.dataset.delta))))));
     root.querySelector('[data-action="status"]')?.addEventListener('change', e => writeField(selected, '状态', e.target.value));
     root.querySelector('[data-action="mood"]')?.addEventListener('change', e => writeField(selected, '心情', e.target.value));
@@ -680,7 +721,8 @@
     const bindInput = (action, field) => {
       root.querySelector(`[data-action="${action}"]`)?.addEventListener('input', e => {
          clearTimeout(timer); 
-         timer = setTimeout(() => writeField(selected, field, e.target.value), 400);
+         // ==== 修复：最后一个参数设为 true（静默保存），让你在打字时再也不会失去焦点 ====
+         timer = setTimeout(() => writeField(selected, field, e.target.value, true), 400);
       });
     };
     bindInput('faction', '势力');
@@ -691,7 +733,6 @@
     bindInput('notes', '备注');
     bindInput('memo', '备忘录');
     
-    // 修复：优化时间插入防止失去焦点和重绘卡顿
     root.querySelector('[data-action="add-memo-time"]')?.addEventListener('click', () => {
         const textarea = root.querySelector('[data-action="memo"]');
         if (textarea) {
@@ -863,7 +904,6 @@
   }
   function closeSubDialog() { document.getElementById('npcpv-subdialog')?.remove(); }
 
-  // ==== 新增：显示黑名单管理界面 ====
   function showBlacklistDialog() {
     const bl = getBlacklist();
     const listHtml = bl.length === 0 ? '<div class="npcpv-empty compact" style="margin-top:20px;">黑名单空空如也</div>' : 
@@ -901,7 +941,6 @@
       });
     });
   }
-  // ============================
 
   function uploadAvatar(item) {
     const input = document.createElement('input');
